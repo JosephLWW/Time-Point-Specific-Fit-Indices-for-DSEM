@@ -114,16 +114,10 @@ cd dsem-fit-indices
    - Demonstrated excellent power in detecting misspecifications
    - Introduced time-point-specific methods
 
-2. **Fălcuşan, M., Zierahn, K. I., & Saprinskiy, N.** (2024). *Model fit assessment for dynamic structural equation models: Frequentist vs. Bayesian alternatives*. 
+2. **Fălcuşan, M., Zierahn, K. I., & Saprinskiy, N.** (2025). *Model fit assessment for dynamic structural equation models: Frequentist vs. Bayesian alternatives*. 
    - Compared traditional (RMSEA, CFI, TLI) vs. Bayesian indices
    - Found TLI and χ²/df most effective for complex DSEM
    - Highlighted need for improved time-dependent methods
-
-### Key DSEM References
-
-- **Asparouhov, T., Hamaker, E. L., & Muthén, B.** (2018). Dynamic structural equation models. *Structural Equation Modeling*, 25(3), 359-388.
-- **Brandt, H.** (2023). Time-specific model fit in dynamic SEM. *Journal of Structural Equation Modeling*.
-
 ---
 
 
