@@ -89,63 +89,19 @@ cd dsem-fit-indices
 
 ---
 
-## Key Files Description
+## Key Files
 
 ### Data Generation
 
 **`scripts/dgp_sem.R`**
-- `gendata01()`: Generates AR(1) latent growth model with within-time cross-loadings
-- `gendata02()`: Generates model with cross-time cross-loadings
-- Handles missing data (MCAR mechanism)
-- Returns list with true parameters and synthetic observations
 
 ### Model Fitting
 
 **`main.R`**
-- Orchestrates full simulation pipeline
-- Loops over simulation conditions
-- Fits Stan models (DSEM_VAR1_RI and DSEM_NULL)
-- Saves posterior samples and convergence diagnostics
-- Integrates with HPC job arrays
 
 ### Fit Indices
 
 **`scripts/fitindices_utils.R`**
-
-Key functions:
-
----
-
-## Stan Models
-
-### `models/DSEM_VAR1_RI.stan` (True Model)
-
-**Structure**:
-- N subjects, Nt time points
-- 2 latent factors (η) with AR(1) dynamics
-- 6 observed indicators (y) per time point
-- Random intercepts (u₀)
-- Multivariate normal errors
-
-**Parameters**:
-- λ (factor loadings)
-- Φ (AR coefficient matrix)
-- Ψ (error covariances)
-
-### `models/DSEM_NULL.stan` (Null Model)
-
-**Structure**:
-- Time-varying means
-- Independent observations across time
-- Used for computing fit indices via likelihood ratio
-
----
-
-## Expected Results
-
-Based on prior work (Saprinskiy, 2024; Fălcuşan et al.):
-
-
 
 ---
 
@@ -182,8 +138,6 @@ This is a Master thesis project. For questions or suggestions:
 
 ## License
 
-MIT License - See LICENSE file for details
-
 ---
 
 ## Citation
@@ -202,17 +156,6 @@ If you use this code in your research, please cite:
 
 ---
 
-## Status & Timeline
-
-- ✅ Data generation: Complete
-- ✅ Stan models: Complete  
-- ✅ Fit indices functions: Complete
-- ⏳ **Simulation runs**: In progress (Jan-Feb 2026)
-- ⏳ Results analysis: Planned (Feb-Mar 2026)
-- ⏳ Thesis writing: Planned (Mar-Apr 2026)
-
----
-
 **Last Updated**: January 2026  
-**Repository**: [github.com/your-username/dsem-fit-indices](https://github.com)
+**Repository**: [https://github.com/JosephLWW/Time-Point-Specific-Fit-Indices-for-DSEM/](https://github.com)
 
