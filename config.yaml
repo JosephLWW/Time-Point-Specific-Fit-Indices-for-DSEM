@@ -10,7 +10,8 @@ settings:
   
   # T_event proportions based on N_t
   T_event: [0.25, 0.5, 0.75]
-  R: 250  # Replications (1 per core)
+  # Replications (1 per core?) 355 cpus 64 cores per node
+  R: 1 # 250  
 
   
   # Mapping T_event to N_t
