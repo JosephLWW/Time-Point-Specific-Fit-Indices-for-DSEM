@@ -115,12 +115,12 @@ if (rslurm_id > nrow(conditions_grid)) {
   stop(paste("SLURM_ARRAY_TASK_ID", rslurm_id, "exceeds number of conditions", nrow(conditions_grid)))
 }
 
-# Get condition for this task
+# Get condition for this task (convert to numeric explicitly)
 cond <- conditions_grid[rslurm_id, ]
-N <- cond$N
-Nt <- cond$Nt
-M <- cond$M
-T_event_prop <- cond$T_event_prop
+N <- as.numeric(cond$N)
+Nt <- as.numeric(cond$Nt)
+M <- as.numeric(cond$M)
+T_event_prop <- as.numeric(cond$T_event_prop)
 t0 <- calculate_T_event(Nt, T_event_prop)
 
 # Create output directory

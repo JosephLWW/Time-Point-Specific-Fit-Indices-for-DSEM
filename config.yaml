@@ -42,3 +42,4 @@ mcmc:
 output:
   results_dir: "results/sim2"
   save_format: "rds"
+  
