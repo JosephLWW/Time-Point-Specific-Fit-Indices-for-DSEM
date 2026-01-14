@@ -17,7 +17,7 @@ if (!dir.exists(user_lib)) {
 
 # Install and load packages
 required_pkgs <- c(
-  "cyaml","parallelly","this.path","mvtnorm","matrixcalc","Matrix",
+  "yaml","parallelly","this.path","mvtnorm","matrixcalc","Matrix",
   "rstan","loo",
   "DBI","RSQLite"
 )
