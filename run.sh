@@ -17,9 +17,7 @@ module load math/R/4.1.2
 
 
 # Define Variables
-SCRIPT_DIR="scripts"
 LOG_DIR="logs"
-DATA_DIR="data/raw"
 
 # Start Message
 echo "=========================================="

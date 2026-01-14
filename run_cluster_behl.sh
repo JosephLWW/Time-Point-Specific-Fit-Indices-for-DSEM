@@ -3,39 +3,38 @@
 #SBATCH --partition=cpu              # <--- CORREGIDO (antes era 'single')
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1            # 1 CPU por simulación es suficiente usualmente
-#SBATCH --mem-per-cpu=4G             # <--- AUMENTADO (500MB es muy poco para Stan/DSEM)
-#SBATCH --time=04:00:00              # Dale tiempo suficiente a Stan (ajusta según necesidad)
-#SBATCH --array=75-124               # Tu rango de arrays
+#SBATCH --time=24:00:00              # Dale tiempo suficiente a Stan (ajusta según necesidad)
+#SBATCH --array=1-324%64          # 324 conditions, max 64 concurrent
+#SBATCH --cpus-per-task=1    # 1 core por condición
+#SBATCH --mem-per-cpu=4G
 #SBATCH --output=logs/sim_%A_%a.out  # Logs organizados (%A=jobID, %a=arrayID)
 #SBATCH --error=logs/sim_%A_%a.err
 
-# 1. Limpiar y Cargar Módulos
+# Clean modules and load R
 module purge
-# Asegúrate que esta versión de R existe con: module avail R
-module load math/R/4.1.2 
+# To check R version: module avail R
+module load math/R
 
-# 2. Definir Directorios (Basado en la estructura que creamos)
-# Usamos $SLURM_SUBMIT_DIR para asegurar que estamos en la raíz del proyecto
-PROJECT_ROOT=$SLURM_SUBMIT_DIR
-SCRIPT_PATH="$PROJECT_ROOT/scripts/01_model_fitting/main.R"
-LOG_DIR="$PROJECT_ROOT/logs"
+# 2. Definir Directorio log
+LOG_DIR="logs"
 
 # 3. Crear directorio de logs si no existe
-mkdir -p "$LOG_DIR"
+if [ ! -d "$LOG_DIR" ]; then
+    echo "Creating logs directory..."
+    mkdir -p "$LOG_DIR"
+fi
+
 
 # 4. Mensaje de Inicio
 echo "=========================================="
+echo "Starting DSEM Simulation at: $(date)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Array ID: $SLURM_ARRAY_TASK_ID"
 echo "Node: $HOSTNAME"
-echo "Starting DSEM Simulation at: $(date)"
-echo "Running script: $SCRIPT_PATH"
 echo "=========================================="
 
 # 5. Ejecutar R
-# Pasamos el ID del array como argumento al script de R
-Rscript "$SCRIPT_PATH" "$SLURM_ARRAY_TASK_ID"
+Rscript main.R
 
 # 6. Verificación de Salida
 EXIT_CODE=$?
