@@ -16,8 +16,8 @@ if (is.na(rslurm_id)) rslurm_id <- 1  # pruebas locales
 # Working environment
 setwd(this.path::this.dir())
 getwd()
-# config <- yaml.load_file("config.yaml") # Production
-config <- yaml.load_file("config_test.yaml") # Local testing
+config <- yaml.load_file("config.yaml") # Production
+# config <- yaml.load_file("config_test.yaml") # Local testing
 source("src/dgp_sem.R")
 source("src/fitindices_utils.R")
 
