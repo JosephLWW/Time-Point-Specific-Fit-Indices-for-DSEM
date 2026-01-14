@@ -34,6 +34,8 @@ echo "Node: $HOSTNAME"
 echo "=========================================="
 
 # 5. Ejecutar R
+RUN_ID="${SLURM_JOB_ID}_$(date +%Y%m%d_%H%M%S)"
+export RUN_ID
 Rscript main.R
 
 # 6. Verificación de Salida

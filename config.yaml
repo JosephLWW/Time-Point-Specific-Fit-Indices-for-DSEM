@@ -40,6 +40,8 @@ mcmc:
 
 
 output:
-  results_dir: "results/sim2"
-  save_format: "rds"
+  results_dir: "results/"
+  save_format: "sqlite"
+
+
 

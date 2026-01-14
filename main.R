@@ -16,8 +16,11 @@ if (!dir.exists(user_lib)) {
 .libPaths(c(user_lib, .libPaths()))
 
 # Install and load packages
-required_pkgs <- c("yaml", "parallelly", "this.path", "mvtnorm", 
-                   "matrixcalc", "Matrix", "rstan", "loo")
+required_pkgs <- c(
+  "cyaml","parallelly","this.path","mvtnorm","matrixcalc","Matrix",
+  "rstan","loo",
+  "DBI","RSQLite"
+)
 
 for (pkg in required_pkgs) {
   if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
@@ -110,6 +113,66 @@ conditions_grid <- expand.grid(
 rslurm_id <- as.numeric(Sys.getenv('SLURM_ARRAY_TASK_ID'))
 if (is.na(rslurm_id)) rslurm_id <- 1 # local testing
 
+run_id <- Sys.getenv("RUN_ID")
+if (run_id == "") run_id <- format(Sys.time(), "%Y%m%d_%H%M%S")
+
+job_id <- as.integer(Sys.getenv("SLURM_JOB_ID"))
+if (is.na(job_id)) job_id <- -1
+
+base_dir <- config$output$results_dir
+run_dir  <- file.path(base_dir, paste0("run_", run_id))
+
+db_file <- file.path(run_dir, "fit_indices.sqlite")
+
+con <- DBI::dbConnect(RSQLite::SQLite(), db_file)
+
+DBI::dbExecute(con, "PRAGMA journal_mode = WAL;")
+DBI::dbExecute(con, "PRAGMA synchronous = NORMAL;")
+DBI::dbExecute(con, "PRAGMA busy_timeout = 60000;")
+
+DBI::dbExecute(con, "
+  CREATE TABLE IF NOT EXISTS fit_overall (
+    run_id TEXT,
+    job_id INTEGER,
+    array_id INTEGER,
+    rep INTEGER,
+    N INTEGER,
+    Nt INTEGER,
+    M REAL,
+    T_event_prop REAL,
+    t0 INTEGER,
+    conv_max_rhat REAL,
+    BRMSEA REAL,
+    BGamma REAL,
+    BadjGamma REAL,
+    BMc REAL,
+    BCFI REAL,
+    BTLI REAL,
+    created_at TEXT
+  );
+")
+
+DBI::dbExecute(con, "
+  CREATE TABLE IF NOT EXISTS fit_timepoint (
+    run_id TEXT,
+    job_id INTEGER,
+    array_id INTEGER,
+    rep INTEGER,
+    time INTEGER,
+    N INTEGER,
+    Nt INTEGER,
+    M REAL,
+    T_event_prop REAL,
+    t0 INTEGER,
+    BRMSEA REAL,
+    BGamma REAL,
+    BadjGamma REAL,
+    BMc REAL,
+    BCFI REAL,
+    BTLI REAL
+  );
+")
+
 # Validate task ID
 if (rslurm_id > nrow(conditions_grid)) {
   stop(paste("SLURM_ARRAY_TASK_ID", rslurm_id, "exceeds number of conditions", nrow(conditions_grid)))
@@ -135,6 +198,20 @@ cat("========================================\n")
 ##########################
 # Main loop: R replications for this condition
 ##########################
+
+# Helper for appending to DB with retries
+db_append_retry <- function(con, table, df, retries = 20, sleep_sec = 0.5) {
+  for (k in seq_len(retries)) {
+    ok <- try({
+      DBI::dbAppendTable(con, table, df)
+      TRUE
+    }, silent = TRUE)
+
+    if (!inherits(ok, "try-error")) return(invisible(TRUE))
+    Sys.sleep(sleep_sec * k)
+  }
+  stop("DB write failed repeatedly (database locked?)")
+}
 
 for (rep in 1:R) {
   
@@ -179,21 +256,59 @@ for (rep in 1:R) {
   modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, fit1.null = fit1.null)
   modelfit[[3]] <- conv
   
-  # Save results
-  nomfile <- paste0(
-    "results/N", N,
-    "_Nt", Nt,
-    "_M", M,
-    "_t0", t0,
-    "_prop", T_event_prop,
-    "_rep", rep,
-    ".RDS"
-  )
-  saveRDS(modelfit, file = nomfile)
-  
-  cat("Replication", rep, "/", R, "completed.\n")
-  
+idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
+
+overall_vals <- as.numeric(modelfit[[1]])
+names(overall_vals) <- idx_names
+
+overall_row <- data.frame(
+  run_id = run_id,
+  job_id = job_id,
+  array_id = rslurm_id,
+  rep = rep,
+  N = N,
+  Nt = Nt,
+  M = M,
+  T_event_prop = T_event_prop,
+  t0 = t0,
+  conv_max_rhat = as.numeric(conv),
+  BRMSEA = overall_vals["BRMSEA"],
+  BGamma = overall_vals["BGamma"],
+  BadjGamma = overall_vals["BadjGamma"],
+  BMc = overall_vals["BMc"],
+  BCFI = overall_vals["BCFI"],
+  BTLI = overall_vals["BTLI"],
+  created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+)
+
+tp_mat <- modelfit[[2]]
+tp_df <- as.data.frame(tp_mat)
+colnames(tp_df) <- idx_names
+tp_df$time <- seq_len(Nt)
+
+tp_df <- tp_df[, c("time", idx_names)]
+tp_df$run_id <- run_id
+tp_df$job_id <- job_id
+tp_df$array_id <- rslurm_id
+tp_df$rep <- rep
+tp_df$N <- N
+tp_df$Nt <- Nt
+tp_df$M <- M
+tp_df$T_event_prop <- T_event_prop
+tp_df$t0 <- t0
+
+tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","Nt","M","T_event_prop","t0", idx_names)]
+
+DBI::dbWithTransaction(con, {
+  db_append_retry(con, "fit_overall", overall_row)
+  db_append_retry(con, "fit_timepoint", tp_df)
+})
+
+cat("Replication", rep, "/", R, "completed.\n")
 } # end replications loop
+
+# Close DB connection
+DBI::dbDisconnect(con)
 
 cat("========================================\n")
 cat("Condition", rslurm_id, "finished successfully.\n")
