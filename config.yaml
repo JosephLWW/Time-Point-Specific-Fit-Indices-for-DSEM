@@ -34,12 +34,12 @@ stan:
 
 mcmc:
   chains: 4
-  iter: 4000
-  warmup: 2000
-  cores: 1
+  iter: 2000
+  warmup: 1000
+  cores: 2
 
 
 output:
   results_dir: "results/sim2"
   save_format: "rds"
-  
+
