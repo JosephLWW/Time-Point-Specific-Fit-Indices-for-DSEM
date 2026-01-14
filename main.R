@@ -1,11 +1,31 @@
 ### INITIAL CONFIGURATION ###
 
-# Install packages if needed and load
-sapply(c("yaml", "parallelly", "this.path" ,"mvtnorm", "matrixcalc", "Matrix", "rstan", "loo"),
-       function(pkg) if (!require(pkg, character.only = TRUE)) {
-         install.packages(pkg)
-         library(pkg, character.only = TRUE)
-       })
+# Set up personal library path
+user_lib <- Sys.getenv("R_LIBS_USER")
+if (user_lib == "") {
+  user_lib <- path.expand("~/R/x86_64-pc-linux-gnu-library/4.5")
+}
+
+# Create personal library if it doesn't exist
+if (!dir.exists(user_lib)) {
+  dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+  cat("Created personal R library at:", user_lib, "\n")
+}
+
+# Add to library paths
+.libPaths(c(user_lib, .libPaths()))
+
+# Install and load packages
+required_pkgs <- c("yaml", "parallelly", "this.path", "mvtnorm", 
+                   "matrixcalc", "Matrix", "rstan", "loo")
+
+for (pkg in required_pkgs) {
+  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+    cat("Installing", pkg, "...\n")
+    install.packages(pkg, lib = user_lib, repos = "https://cloud.r-project.org")
+    library(pkg, character.only = TRUE)
+  }
+}
 
 rstan_options(auto_write = TRUE)
 
