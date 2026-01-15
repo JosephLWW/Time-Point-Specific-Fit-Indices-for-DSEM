@@ -1,51 +1,53 @@
 #!/bin/bash
-#SBATCH --job-name=hdi-pipeline
-#SBATCH --time=01:00:00
-#SBATCH --cpus-per-task=1
+#SBATCH --job-name=dsem_sim
+#SBATCH --partition=cpu              # <--- CORREGIDO (antes era 'single')
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --time=24:00:00              # Dale tiempo suficiente a Stan (ajusta según necesidad)
+#SBATCH --array=1-324%64          # 324 conditions, max 64 concurrent
+#SBATCH --cpus-per-task=2
+#SBATCH --mem-per-cpu=16G
+#SBATCH --output=logs/sim_%A_%a.out  # Logs organizados (%A=jobID, %a=arrayID)
+#SBATCH --error=logs/sim_%A_%a.err
 
-#SBATCH --array=75-124
-#SBATCH --job-name=rslurm_multi_array
-#SBATCH --output=slurm_%a.out
-#SBATCH --time=24:00:00
-#SBATCH --partition=single
-#SBATCH --mem-per-cpu=500
-
+# Clean modules and load R
 module purge
-module load math/R/4.1.2
+# To check R version: module avail R
+module load math/R
 
-
-
-
-# Define Variables
+# 2. Definir Directorio log
 LOG_DIR="logs"
 
-# Start Message
-echo "=========================================="
-echo "Starting HDI Pipeline at: $(date)"
-echo "=========================================="
-
-# Check/Create Directories
+# 3. Crear directorio de logs si no existe
 if [ ! -d "$LOG_DIR" ]; then
     echo "Creating logs directory..."
     mkdir -p "$LOG_DIR"
 fi
 
 
-# Execute
-echo "Running..."
-Rscript main.R > "$LOG_DIR/log_$SLURM_ARRAY_TASK_ID.txt" 2>&1
+# 4. Mensaje de Inicio
+echo "=========================================="
+echo "Starting DSEM Simulation at: $(date)"
+echo "Job ID: $SLURM_JOB_ID"
+echo "Array ID: $SLURM_ARRAY_TASK_ID"
+echo "Node: $HOSTNAME"
+echo "=========================================="
 
-# 5. Check for Success (Exit Code Analysis)
+# 5. Ejecutar R
+RUN_ID="${SLURM_JOB_ID}_$(date +%Y%m%d_%H%M%S)"
+export RUN_ID
+Rscript main.R
+
+# 6. Verificación de Salida
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -eq 0 ]; then
-    echo " completed successfully."
+    echo "SUCCESS: R script finished correctly."
 else
-    echo "ERROR: exit code $EXIT_CODE."
-    exit 1  # Stop the pipeline here
+    echo "ERROR: R script failed with exit code $EXIT_CODE."
+    exit 1
 fi
 
-# 7. Final Message
 echo "=========================================="
-echo "Pipeline finished successfully at: $(date)."
+echo "Finished at: $(date)"
 echo "=========================================="
