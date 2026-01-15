@@ -99,12 +99,15 @@ calculate_T_event <- function(N_t, proportion) {
 ##########################
 
 conditions_grid <- expand.grid(
-  N = N.all,
-  Nt = Nt.all,
-  M = size_miss,
-  T_event_prop = T_event,
+  N = as.numeric(N.all),
+  Nt = as.numeric(Nt.all),
+  M = as.numeric(size_miss),
+  T_event_prop = as.numeric(T_event),
   stringsAsFactors = FALSE
 )
+
+conditions_grid$N <- as.numeric(as.character(conditions_grid$N))
+conditions_grid$Nt <- as.numeric(as.character(conditions_grid$Nt))
 
 ##########################
 # SLURM task ID & Run Configuration
