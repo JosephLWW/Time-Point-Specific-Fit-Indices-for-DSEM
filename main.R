@@ -42,16 +42,21 @@ getwd()
 config <- yaml.load_file("config.yaml") # Production
 # config <- yaml.load_file("config_test.yaml") # Local testing
 
+# Debug info
+cat("Config file loaded from:", file.path(getwd(), "config.yaml"), "\n")
+cat("Values in N.all:", paste(N.all, collapse=", "), "\n")
+cat("Values in N_t.all:", paste(N_t.all, collapse=", "), "\n")
+
 source("src/dgp_sem.R")
 source("src/fitindices_utils.R")
 
 ### GET SETTINGS FROM CONFIG FILE ###
 
 seed <- config$seed
-N.all <- as.numeric(unlist(config$settings$N))
-N_t.all <- as.numeric(unlist(config$settings$N_t))
-size_miss <- as.numeric(unlist(config$settings$M))
-T_event <- as.numeric(unlist(config$settings$T_event))
+N_vec <- as.numeric(unlist(config$settings$N))
+Nt_vec <- as.numeric(unlist(config$settings$N_t))
+M_vec <- as.numeric(unlist(config$settings$M))
+T_vec <- as.numeric(unlist(config$settings$T_event))
 R <- config$settings$R  # replications per condition
 
 # MCMC
@@ -99,15 +104,16 @@ calculate_T_event <- function(N_t, proportion) {
 ##########################
 
 conditions_grid <- expand.grid(
-  N = N.all,
-  N_t = N_t.all,
-  M = size_miss,
-  T_event_prop = T_event,
+  N = N_vec,
+  N_t = Nt_vec,
+  M = M_vec,
+  T_event_prop = T_vec,
   stringsAsFactors = FALSE
 )
 
-conditions_grid$N <- as.numeric(as.character(conditions_grid$N))
-conditions_grid$N_t <- as.numeric(as.character(conditions_grid$N_t))
+colnames(conditions_grid) <- c("N", "N_t", "M", "T_event_prop")
+
+
 
 ##########################
 # SLURM task ID & Run Configuration
