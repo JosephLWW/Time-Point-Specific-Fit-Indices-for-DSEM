@@ -42,11 +42,6 @@ getwd()
 config <- yaml.load_file("config.yaml") # Production
 # config <- yaml.load_file("config_test.yaml") # Local testing
 
-# Debug info
-cat("Config file loaded from:", file.path(getwd(), "config.yaml"), "\n")
-cat("Values in N.all:", paste(N.all, collapse=", "), "\n")
-cat("Values in N_t.all:", paste(N_t.all, collapse=", "), "\n")
-
 source("src/dgp_sem.R")
 source("src/fitindices_utils.R")
 
