@@ -48,10 +48,10 @@ source("src/fitindices_utils.R")
 ### GET SETTINGS FROM CONFIG FILE ###
 
 seed <- config$seed
-N.all <- config$settings$N
-Nt.all <- config$settings$N_t
-size_miss <- config$settings$M
-T_event <- config$settings$T_event
+N.all <- as.numeric(unlist(config$settings$N))
+N_t.all <- as.numeric(unlist(config$settings$N_t))
+size_miss <- as.numeric(unlist(config$settings$M))
+T_event <- as.numeric(unlist(config$settings$T_event))
 R <- config$settings$R  # replications per condition
 
 # MCMC
@@ -99,15 +99,15 @@ calculate_T_event <- function(N_t, proportion) {
 ##########################
 
 conditions_grid <- expand.grid(
-  N = as.numeric(N.all),
-  Nt = as.numeric(Nt.all),
-  M = as.numeric(size_miss),
-  T_event_prop = as.numeric(T_event),
+  N = N.all,
+  N_t = N_t.all,
+  M = size_miss,
+  T_event_prop = T_event,
   stringsAsFactors = FALSE
 )
 
 conditions_grid$N <- as.numeric(as.character(conditions_grid$N))
-conditions_grid$Nt <- as.numeric(as.character(conditions_grid$Nt))
+conditions_grid$N_t <- as.numeric(as.character(conditions_grid$N_t))
 
 ##########################
 # SLURM task ID & Run Configuration
@@ -116,6 +116,13 @@ conditions_grid$Nt <- as.numeric(as.character(conditions_grid$Nt))
 # 1. Identificar la tarea individual (1, 2, 3...)
 rslurm_id <- as.numeric(Sys.getenv('SLURM_ARRAY_TASK_ID'))
 if (is.na(rslurm_id)) rslurm_id <- 1
+
+# VALIDACIÓN EXPLICITA
+if(rslurm_id == 1) {
+    cat("DEBUG: Grid structure (first 6 rows):\n")
+    print(head(conditions_grid))
+}
+
 # Random pause to avoid crashing
 Sys.sleep(runif(1, min = 0, max = 5))
 
@@ -169,7 +176,7 @@ DBI::dbExecute(con, "
     array_id INTEGER,
     rep INTEGER,
     N INTEGER,
-    Nt INTEGER,
+    N_t INTEGER,
     M REAL,
     T_event_prop REAL,
     t0 INTEGER,
@@ -192,7 +199,7 @@ DBI::dbExecute(con, "
     rep INTEGER,
     time INTEGER,
     N INTEGER,
-    Nt INTEGER,
+    N_t INTEGER,
     M REAL,
     T_event_prop REAL,
     t0 INTEGER,
@@ -213,17 +220,17 @@ if (rslurm_id > nrow(conditions_grid)) {
 # Get condition for this task (convert to numeric explicitly)
 cond <- conditions_grid[rslurm_id, ]
 N <- as.numeric(cond$N)
-Nt <- as.numeric(cond$Nt)
+N_t <- as.numeric(cond$N_t)
 M <- as.numeric(cond$M)
 T_event_prop <- as.numeric(cond$T_event_prop)
-t0 <- calculate_T_event(Nt, T_event_prop)
+t0 <- calculate_T_event(N_t, T_event_prop)
 
 # Create output directory
 dir.create("results", showWarnings = FALSE, recursive = TRUE)
 
 cat("========================================\n")
 cat("Condition ID:", rslurm_id, "\n")
-cat("N =", N, "| Nt =", Nt, "| M =", M, "| T_event =", T_event_prop, "| t0 =", t0, "\n")
+cat("N =", N, "| N_t =", N_t, "| M =", M, "| T_event =", T_event_prop, "| t0 =", t0, "\n")
 cat("Running", R, "replications...\n")
 cat("========================================\n")
 
@@ -254,11 +261,16 @@ for (rep in 1:R) {
   ly1 <- matrix(0, 6, 2)
   ly1[4, 1] <- M
   
-  dat1 <- gendata02(N, Nt, phi0, mu0, ar0, ly0, ly1, td, t0 = t0)
+  # IMPORTANTE: Asegúrate de pasar los argumentos en orden o por nombre
+  # Tu función gendata02 usa 'Nt', así que pasamos tu variable 'N_t' a ese argumento
+  dat1 <- gendata02(N = N, Nt = N_t, phi0 = phi0, mu0 = mu0, ar0 = ar0, ly0 = ly0, ly1 = ly1, td = td, t0 = t0)
   y <- dat1[["y"]]
   y.2 <- dat1[["y0"]]
   
-  data.stan1 <- list(N = N, Nt = Nt, y = y)
+  # --- CORRECCIÓN CRÍTICA AQUÍ ---
+  # El archivo .stan espera "Nt", pero tu variable en R es "N_t".
+  # Debemos asignarlo explícitamente: Nt = N_t
+  data.stan1 <- list(N = N, Nt = N_t, y = y)
   
   # Fit models
   fit1 <- sampling(sm1, data = data.stan1,
@@ -282,41 +294,50 @@ for (rep in 1:R) {
   for (t1 in 1:length(params2)) {
     beta_indices <- c(beta_indices, grep(params2[t1], param_names))
   }
-  conv <- max(fit_summary$summary[beta_indices, "Rhat"])
+  
+  # Manejo de error si beta_indices está vacío (por si acaso)
+  if(length(beta_indices) > 0){
+      conv <- max(fit_summary$summary[beta_indices, "Rhat"], na.rm = TRUE)
+  } else {
+      conv <- NA
+  }
   
   # Compute fit indices
-  modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, fit1.null = fit1.null)
+  # --- CORRECCIÓN MENOR AQUÍ ---
+  # getfit espera 'Nt', se lo pasamos explícitamente
+  modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = N_t, cfi = TRUE, fit1.null = fit1.null)
   modelfit[[3]] <- conv
   
-idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
+  # ... (Resto del código de guardado en DB sigue igual) ...
+  idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
 
-overall_vals <- as.numeric(modelfit[[1]])
-names(overall_vals) <- idx_names
+  overall_vals <- as.numeric(modelfit[[1]])
+  names(overall_vals) <- idx_names
 
-overall_row <- data.frame(
-  run_id = run_id,
-  job_id = job_id,
-  array_id = rslurm_id,
-  rep = rep,
-  N = N,
-  Nt = Nt,
-  M = M,
-  T_event_prop = T_event_prop,
-  t0 = t0,
-  conv_max_rhat = as.numeric(conv),
-  BRMSEA = overall_vals["BRMSEA"],
-  BGamma = overall_vals["BGamma"],
-  BadjGamma = overall_vals["BadjGamma"],
-  BMc = overall_vals["BMc"],
-  BCFI = overall_vals["BCFI"],
-  BTLI = overall_vals["BTLI"],
-  created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-)
+  overall_row <- data.frame(
+    run_id = run_id,
+    job_id = job_id,
+    array_id = rslurm_id,
+    rep = rep,
+    N = N,
+    Nt = N_t, # Guardamos N_t en la columna Nt (o N_t según definiste la tabla)
+    M = M,
+    T_event_prop = T_event_prop,
+    t0 = t0,
+    conv_max_rhat = as.numeric(conv),
+    BRMSEA = overall_vals["BRMSEA"],
+    BGamma = overall_vals["BGamma"],
+    BadjGamma = overall_vals["BadjGamma"],
+    BMc = overall_vals["BMc"],
+    BCFI = overall_vals["BCFI"],
+    BTLI = overall_vals["BTLI"],
+    created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  )
 
 tp_mat <- modelfit[[2]]
 tp_df <- as.data.frame(tp_mat)
 colnames(tp_df) <- idx_names
-tp_df$time <- seq_len(Nt)
+tp_df$time <- seq_len(N_t)
 
 tp_df <- tp_df[, c("time", idx_names)]
 tp_df$run_id <- run_id
@@ -324,12 +345,12 @@ tp_df$job_id <- job_id
 tp_df$array_id <- rslurm_id
 tp_df$rep <- rep
 tp_df$N <- N
-tp_df$Nt <- Nt
+tp_df$N_t <- N_t
 tp_df$M <- M
 tp_df$T_event_prop <- T_event_prop
 tp_df$t0 <- t0
 
-tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","Nt","M","T_event_prop","t0", idx_names)]
+tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","N_t","M","T_event_prop","t0", idx_names)]
 
 DBI::dbWithTransaction(con, {
   db_append_retry(con, "fit_overall", overall_row)
