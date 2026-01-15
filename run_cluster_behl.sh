@@ -40,6 +40,8 @@ Rscript main.R
 EXIT_CODE=$?
 if [ $EXIT_CODE -eq 0 ]; then
     echo "SUCCESS"
+    rm "logs/sim_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.out"
+    rm "logs/sim_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.err"
 else
     echo "ERROR"
     exit 1
