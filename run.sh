@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=dsem_sim
-#SBATCH --partition=cpu              # <--- CORREGIDO (antes era 'single')
+#SBATCH --partition=cpu-single
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --time=24:00:00              # Dale tiempo suficiente a Stan (ajusta según necesidad)
