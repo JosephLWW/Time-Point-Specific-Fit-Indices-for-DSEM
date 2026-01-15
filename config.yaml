@@ -11,7 +11,7 @@ settings:
   # T_event proportions based on N_t
   T_event: [0.25, 0.5, 0.75]
   # Replications (1 per core?) 355 cpus 64 cores per node
-  R: 1 # 250  
+  R: 1 # 355 cpus 64 cores per node
 
   
   # Mapping T_event to N_t
@@ -36,7 +36,7 @@ mcmc:
   chains: 4
   iter: 2000
   warmup: 1000
-  cores: 2
+  cores: 4
 
 
 output:

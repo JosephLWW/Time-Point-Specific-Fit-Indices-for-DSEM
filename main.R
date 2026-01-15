@@ -122,6 +122,10 @@ if (is.na(job_id)) job_id <- -1
 base_dir <- config$output$results_dir
 run_dir  <- file.path(base_dir, paste0("run_", run_id))
 
+# Create run directory if it doesn't exist
+if (!dir.exists(run_dir)) {
+  dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
+}
 db_file <- file.path(run_dir, "fit_indices.sqlite")
 
 con <- DBI::dbConnect(RSQLite::SQLite(), db_file)

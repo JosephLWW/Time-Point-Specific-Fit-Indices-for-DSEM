@@ -6,7 +6,7 @@
 #SBATCH --time=24:00:00              # Dale tiempo suficiente a Stan (ajusta según necesidad)
 #SBATCH --array=1-324%64          # 324 conditions, max 64 concurrent
 #SBATCH --cpus-per-task=2
-#SBATCH --mem-per-cpu=16G
+#SBATCH --mem-per-cpu=256000
 #SBATCH --output=logs/sim_%A_%a.out  # Logs organizados (%A=jobID, %a=arrayID)
 #SBATCH --error=logs/sim_%A_%a.err
 
