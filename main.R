@@ -107,26 +107,51 @@ conditions_grid <- expand.grid(
 )
 
 ##########################
-# SLURM task ID
+# SLURM task ID & Run Configuration
 ##########################
 
+# 1. Identificar la tarea individual (1, 2, 3...)
 rslurm_id <- as.numeric(Sys.getenv('SLURM_ARRAY_TASK_ID'))
-if (is.na(rslurm_id)) rslurm_id <- 1 # local testing
+if (is.na(rslurm_id)) rslurm_id <- 1
+# Random pause to avoid crashing
+Sys.sleep(runif(1, min = 0, max = 5))
 
+# 2. Identificar el "RUN" global (Debe ser IDÉNTICO para todas las tareas)
+# Intentamos leer la variable manual, si falla, usamos el ID del Job Array de Slurm
 run_id <- Sys.getenv("RUN_ID")
-if (run_id == "") run_id <- format(Sys.time(), "%Y%m%d_%H%M%S")
+
+if (run_id == "") {
+  # Fallback seguro: Usar el ID del Array Job (ej. 2933037)
+  # Este ID es compartido por todas las tareas del array
+  val_job_id <- Sys.getenv("SLURM_ARRAY_JOB_ID")
+  
+  if (val_job_id != "") {
+    run_id <- val_job_id
+  } else {
+    # Solo si no hay SLURM (local testing), usamos fecha
+    run_id <- format(Sys.time(), "%Y%m%d_%H%M%S")
+  }
+}
 
 job_id <- as.integer(Sys.getenv("SLURM_JOB_ID"))
 if (is.na(job_id)) job_id <- -1
 
+# 3. Definir rutas
 base_dir <- config$output$results_dir
+# Ahora run_dir será siempre igual para todo el array (ej. results/run_2933037)
 run_dir  <- file.path(base_dir, paste0("run_", run_id))
 
-# Create run directory if it doesn't exist
+# 4. Crear directorio (con gestión de concurrencia básica)
+# showWarnings=FALSE evita errores si otra tarea ya creó la carpeta hace 1 milisegundo
 if (!dir.exists(run_dir)) {
   dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
 }
+
 db_file <- file.path(run_dir, "fit_indices.sqlite")
+
+# Pequeña pausa aleatoria antes de conectar para evitar "thundering herd"
+# (que 100 tareas intenten crear el archivo .sqlite en el mismo microsegundo exacto)
+Sys.sleep(runif(1, min=0.1, max=2.0))
 
 con <- DBI::dbConnect(RSQLite::SQLite(), db_file)
 

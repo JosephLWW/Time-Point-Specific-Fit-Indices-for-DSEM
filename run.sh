@@ -3,17 +3,21 @@
 #SBATCH --partition=cpu-single
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --time=24:00:00              # Dale tiempo suficiente a Stan (ajusta según necesidad)
-#SBATCH --array=1-324%64          # 324 conditions, max 64 concurrent
-#SBATCH --cpus-per-task=2
+#SBATCH --time=24:00:00
+#SBATCH --array=1-324%64
+#SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=256000
-#SBATCH --output=logs/sim_%A_%a.out  # Logs organizados (%A=jobID, %a=arrayID)
+#SBATCH --output=logs/sim_%A_%a.out
 #SBATCH --error=logs/sim_%A_%a.err
 
 # Clean modules and load R
 module purge
 # To check R version: module avail R
 module load math/R
+
+# Set a global Run ID for this execution
+export RUN_ID="${SLURM_ARRAY_JOB_ID}_$(date +%Y%m%d_%H%M%S)"
+echo "Master RUN_ID is: $RUN_ID"
 
 # 2. Definir Directorio log
 LOG_DIR="logs"
