@@ -103,7 +103,7 @@ ly00 <- .6
 ly0  <- matrix(c(ly00,ly00,ly00,0,0,0, 0,0,0,ly00,ly00,ly00), 6, 2)
 td   <- diag(6)*(1-ly00^2)
 
-cat(sprintf("=== STARTING: ID %d | N=%d, Nt=%d, M=%.2f ===\n", rslurm_id, N, Nt, M))
+cat(sprintf("=== STARTING: ID %d | N=%d, Nt=%d, M=%.2f, T_event_prop=%.2f ===\n", rslurm_id, N, Nt, M, T_event_prop))
 
 # 9. Main Replication Loop
 db_append_retry <- function(con, table, df) {
