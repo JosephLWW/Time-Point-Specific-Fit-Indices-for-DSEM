@@ -6,7 +6,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --array=1-324%64
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=256000
+#SBATCH --mem-per-cpu=16G
 #SBATCH --output=logs/sim_%A_%a.out
 #SBATCH --error=logs/sim_%A_%a.err
 

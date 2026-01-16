@@ -235,7 +235,6 @@ db_append_retry <- function(con, table, df, retries = 20, sleep_sec = 0.5) {
       DBI::dbAppendTable(con, table, df)
       TRUE
     }, silent = TRUE)
-
     if (!inherits(ok, "try-error")) return(invisible(TRUE))
     Sys.sleep(sleep_sec * k)
   }
@@ -244,96 +243,124 @@ db_append_retry <- function(con, table, df, retries = 20, sleep_sec = 0.5) {
 
 for (rep in 1:R) {
   
-  # Set unique seed for this replication
-  set.seed(seed + rslurm_id * 100000 + rep)
-  
-  # Generate data
-  ly1 <- matrix(0, 6, 2)
-  ly1[4, 1] <- M
-  
-  dat1 <- gendata02(N, Nt, phi0, mu0, ar0, ly0, ly1, td, t0 = t0)
-  y <- dat1[["y"]]
-  y.2 <- dat1[["y0"]]
-  
-  data.stan1 <- list(N = N, Nt = Nt, y = y)
-  
-  # Fit models
-  fit1 <- sampling(sm1, data = data.stan1,
-                   iter = iter_n,
-                   chains = chains_n,
-                   warmup = warmup_n,
-                   cores = cores_n,
-                   refresh = 0)
-  
-  fit1.null <- sampling(sm1.null, data = data.stan1,
-                        iter = iter_n,
-                        chains = chains_n,
-                        warmup = warmup_n,
-                        cores = cores_n,
-                        refresh = 0)
-  
-  # Extract convergence
-  fit_summary <- summary(fit1)
-  param_names <- rownames(fit_summary$summary)
-  beta_indices <- c()
-  for (t1 in 1:length(params2)) {
-    beta_indices <- c(beta_indices, grep(params2[t1], param_names))
-  }
-  conv <- max(fit_summary$summary[beta_indices, "Rhat"])
-  
-  # Compute fit indices
-  modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, fit1.null = fit1.null)
-  modelfit[[3]] <- conv
-  
-idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
+  tryCatch({
+    
+    cat("Starting Replication", rep, "/", R, "...\n")
+    
+    # Set unique seed for this replication
+    set.seed(seed + rslurm_id * 100000 + rep)
+    
+    # Generate data
+    ly1 <- matrix(0, 6, 2)
+    ly1[4, 1] <- M
+    
+    dat1 <- gendata02(N, Nt, phi0, mu0, ar0, ly0, ly1, td, t0 = t0)
+    y <- dat1[["y"]]
+    y.2 <- dat1[["y0"]]
+    
+    data.stan1 <- list(N = N, Nt = Nt, y = y)
+    
+    # Parámetros de control para mejorar convergencia (Recomendación 2)
+    stan_control_list <- list(adapt_delta = 0.95, max_treedepth = 12)
+    
+    # Fit models
+    fit1 <- sampling(sm1, data = data.stan1,
+                     iter = iter_n,
+                     chains = chains_n,
+                     warmup = warmup_n,
+                     cores = cores_n,
+                     refresh = 0,
+                     control = stan_control_list) # <--- AÑADIDO
+    
+    fit1.null <- sampling(sm1.null, data = data.stan1,
+                          iter = iter_n,
+                          chains = chains_n,
+                          warmup = warmup_n,
+                          cores = cores_n,
+                          refresh = 0,
+                          control = stan_control_list) # <--- AÑADIDO
+    
+    # Extract convergence
+    fit_summary <- summary(fit1)
+    param_names <- rownames(fit_summary$summary)
+    beta_indices <- c()
+    for (t1 in 1:length(params2)) {
+      beta_indices <- c(beta_indices, grep(params2[t1], param_names))
+    }
+    
+    # Protección si fit_summary falla o devuelve estructura vacía
+    if(length(beta_indices) > 0) {
+      conv <- max(fit_summary$summary[beta_indices, "Rhat"], na.rm = TRUE)
+    } else {
+      conv <- NA
+    }
+    
+    # Compute fit indices
+    # Si dMvn falla (retorna NA/-Inf), getfit manejará los NAs resultantes sin crashear
+    modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, fit1.null = fit1.null)
+    modelfit[[3]] <- conv
+    
+    idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
+    
+    overall_vals <- as.numeric(modelfit[[1]])
+    names(overall_vals) <- idx_names
+    
+    overall_row <- data.frame(
+      run_id = run_id,
+      job_id = job_id,
+      array_id = rslurm_id,
+      rep = rep,
+      N = N,
+      Nt = Nt,
+      M = M,
+      T_event_prop = T_event_prop,
+      t0 = t0,
+      conv_max_rhat = as.numeric(conv),
+      BRMSEA = overall_vals["BRMSEA"],
+      BGamma = overall_vals["BGamma"],
+      BadjGamma = overall_vals["BadjGamma"],
+      BMc = overall_vals["BMc"],
+      BCFI = overall_vals["BCFI"],
+      BTLI = overall_vals["BTLI"],
+      created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    )
+    
+    tp_mat <- modelfit[[2]]
+    tp_df <- as.data.frame(tp_mat)
+    colnames(tp_df) <- idx_names
+    tp_df$time <- seq_len(Nt)
+    
+    tp_df <- tp_df[, c("time", idx_names)]
+    tp_df$run_id <- run_id
+    tp_df$job_id <- job_id
+    tp_df$array_id <- rslurm_id
+    tp_df$rep <- rep
+    tp_df$N <- N
+    tp_df$Nt <- Nt
+    tp_df$M <- M
+    tp_df$T_event_prop <- T_event_prop
+    tp_df$t0 <- t0
+    
+    tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","Nt","M","T_event_prop","t0", idx_names)]
+    
+    DBI::dbWithTransaction(con, {
+      db_append_retry(con, "fit_overall", overall_row)
+      db_append_retry(con, "fit_timepoint", tp_df)
+    })
+    
+    cat("Replication", rep, "/", R, "completed successfully.\n")
 
-overall_vals <- as.numeric(modelfit[[1]])
-names(overall_vals) <- idx_names
-
-overall_row <- data.frame(
-  run_id = run_id,
-  job_id = job_id,
-  array_id = rslurm_id,
-  rep = rep,
-  N = N,
-  Nt = Nt,
-  M = M,
-  T_event_prop = T_event_prop,
-  t0 = t0,
-  conv_max_rhat = as.numeric(conv),
-  BRMSEA = overall_vals["BRMSEA"],
-  BGamma = overall_vals["BGamma"],
-  BadjGamma = overall_vals["BadjGamma"],
-  BMc = overall_vals["BMc"],
-  BCFI = overall_vals["BCFI"],
-  BTLI = overall_vals["BTLI"],
-  created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-)
-
-tp_mat <- modelfit[[2]]
-tp_df <- as.data.frame(tp_mat)
-colnames(tp_df) <- idx_names
-tp_df$time <- seq_len(Nt)
-
-tp_df <- tp_df[, c("time", idx_names)]
-tp_df$run_id <- run_id
-tp_df$job_id <- job_id
-tp_df$array_id <- rslurm_id
-tp_df$rep <- rep
-tp_df$N <- N
-tp_df$Nt <- Nt
-tp_df$M <- M
-tp_df$T_event_prop <- T_event_prop
-tp_df$t0 <- t0
-
-tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","Nt","M","T_event_prop","t0", idx_names)]
-
-DBI::dbWithTransaction(con, {
-  db_append_retry(con, "fit_overall", overall_row)
-  db_append_retry(con, "fit_timepoint", tp_df)
-})
-
-cat("Replication", rep, "/", R, "completed.\n")
+  }, error = function(e) {
+    # --- MANEJO DE ERROR ---
+    # Si ocurre cualquier error (incluido el de Cholesky si escapa de getfit), 
+    # se imprime pero el loop continúa a la siguiente replicación.
+    cat("ERROR in Replication", rep, ":", e$message, "\n")
+    
+    # Opcional: Escribir registro de error en DB si tienes una tabla de logs
+    # O simplemente dejar que siga
+  })
+  # --- FIN TRYCATCH ---
+  
 } # end replications loop
 
 # Close DB connection

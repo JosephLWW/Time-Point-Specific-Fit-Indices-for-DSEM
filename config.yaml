@@ -31,8 +31,8 @@ stan:
 
 mcmc:
   chains: 4
-  iter: 2000
-  warmup: 1000
+  iter: 4000
+  warmup: 2000
   cores: 4
 
 

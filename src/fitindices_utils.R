@@ -49,6 +49,16 @@ dMvn <- function(X,mu,Sigma,log=T) {
     #Sigma <- nearPD(Sigma)$mat # this finds the next best pos. def. covmatrix
     Sigma <- Sigma+diag(ncol(Sigma))*eps000 # this finds the next best pos. def. covmatrix
   }
+
+  # JW: Add a wrapper to avoid crashes and debugging
+  # Envolvemos chol() en try() para evitar el crash "leading minor not positive"
+  chol_sigma <- try(chol(Sigma), silent = TRUE)
+  
+  if(inherits(chol_sigma, "try-error")){
+    return(-1e10) # Retornamos un valor muy bajo (loglik casi 0) o NA en vez de romper
+  }
+
+
   rooti <- backsolve(chol(Sigma),diag(k))
   
   quads <- colSums((crossprod(rooti,(t(X)-mu)))^2)
@@ -112,6 +122,9 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
   
   # identification constraint
   id0 <- (dim(y)[1]*dim(y)[3]<(dim(y)[2]+1))
+
+  # Debugging for NA values
+  cat("DEBUG: id0 value is:", id0, "| Dimensions y:", dim(y), "\n")
   
   #######################################################################
   # parameter extraction
