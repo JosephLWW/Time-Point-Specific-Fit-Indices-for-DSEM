@@ -159,6 +159,7 @@ DBI::dbExecute(con, "PRAGMA journal_mode = WAL;")
 DBI::dbExecute(con, "PRAGMA synchronous = NORMAL;")
 DBI::dbExecute(con, "PRAGMA busy_timeout = 60000;")
 
+#Overall results table
 DBI::dbExecute(con, "
   CREATE TABLE IF NOT EXISTS fit_overall (
     run_id TEXT,
@@ -170,6 +171,7 @@ DBI::dbExecute(con, "
     M REAL,
     T_event_prop REAL,
     t0 INTEGER,
+    id0 INTEGER,
     conv_max_rhat REAL,
     BRMSEA REAL,
     BGamma REAL,
@@ -193,6 +195,8 @@ DBI::dbExecute(con, "
     M REAL,
     T_event_prop REAL,
     t0 INTEGER,
+    id0 INTEGER,
+    conv_max_rhat REAL,
     BRMSEA REAL,
     BGamma REAL,
     BadjGamma REAL,
@@ -298,11 +302,15 @@ for (rep in 1:R) {
     # Compute fit indices
     # Si dMvn falla (retorna NA/-Inf), getfit manejará los NAs resultantes sin crashear
     modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, fit1.null = fit1.null)
-    modelfit[[3]] <- conv
+
+    # Identified?
+    val_id0 <- as.integer(modelfit$id0)
     
+    # Prepare results for DB
     idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
     
-    overall_vals <- as.numeric(modelfit[[1]])
+    # Overall
+    overall_vals <- as.numeric(modelfit$overall)
     names(overall_vals) <- idx_names
     
     overall_row <- data.frame(
@@ -315,6 +323,7 @@ for (rep in 1:R) {
       M = M,
       T_event_prop = T_event_prop,
       t0 = t0,
+      id0 = val_id0,
       conv_max_rhat = as.numeric(conv),
       BRMSEA = overall_vals["BRMSEA"],
       BGamma = overall_vals["BGamma"],
@@ -325,11 +334,13 @@ for (rep in 1:R) {
       created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
     )
     
-    tp_mat <- modelfit[[2]]
+    # Time-point specific
+    tp_mat <- modelfit$timepoint
     tp_df <- as.data.frame(tp_mat)
     colnames(tp_df) <- idx_names
     tp_df$time <- seq_len(Nt)
     
+    # Columns
     tp_df <- tp_df[, c("time", idx_names)]
     tp_df$run_id <- run_id
     tp_df$job_id <- job_id
@@ -340,8 +351,11 @@ for (rep in 1:R) {
     tp_df$M <- M
     tp_df$T_event_prop <- T_event_prop
     tp_df$t0 <- t0
+    tp_df$id0 <- val_id0
+    tp_df$conv_max_rhat <- as.numeric(conv)
     
-    tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","Nt","M","T_event_prop","t0", idx_names)]
+    # Reorder columns
+    tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","Nt","M","T_event_prop","t0","id0","conv_max_rhat", idx_names)]
     
     DBI::dbWithTransaction(con, {
       db_append_retry(con, "fit_overall", overall_row)

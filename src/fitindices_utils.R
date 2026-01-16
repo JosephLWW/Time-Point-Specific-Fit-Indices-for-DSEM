@@ -407,16 +407,19 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
     }
   }
   
+  # Clean outputs and id0 value
+  out <- list(
+    overall = round(c(mean(BRMSEA.devm.1),mean(BGamma.devm.1),mean(BadjGamma.devm.1),
+                      mean(BMc.devm.1), mean(BCFI.devm.1),mean(BTLI.devm.1)),3),
+    
+    timepoint = round(cbind(apply(BRMSEA.devm.2,2,mean),apply(BGamma.devm.2,2,mean),
+                            apply(BadjGamma.devm.2,2,mean), apply(BMc.devm.2,2,mean),
+                            apply(BCFI.devm.2,2,mean),apply(BTLI.devm.2,2,mean)),3),
+    
+    id0 = id0  # <--- NUEVO ELEMENTO
+  )
   
-  
-  
-  out <- list(round(c(mean(BRMSEA.devm.1),mean(BGamma.devm.1),mean(BadjGamma.devm.1),mean(BMc.devm.1),
-                      mean(BCFI.devm.1),mean(BTLI.devm.1)),3),
-              round(cbind(apply(BRMSEA.devm.2,2,mean),apply(BGamma.devm.2,2,mean),apply(BadjGamma.devm.2,2,mean),
-                          apply(BMc.devm.2,2,mean),apply(BCFI.devm.2,2,mean),apply(BTLI.devm.2,2,mean)),3))
-  
-  out
-  
+  return(out)
   
 }
 
