@@ -47,7 +47,8 @@ source("src/fitindices_utils.R")
 
 ### GET SETTINGS FROM CONFIG FILE ###
 
-seed <- config$seed
+seed <- if(!is.null(config$seed)) config$seed else 42
+overall_fits <- if(!is.null(config$overall_fits)) config$overall_fits else FALSE
 N.all <- config$settings$N
 Nt.all <- config$settings$N_t
 size_miss <- config$settings$M
@@ -305,7 +306,7 @@ for (rep in 1:R) {
     
     # Compute fit indices
     # Si dMvn falla (retorna NA/-Inf), getfit manejará los NAs resultantes sin crashear
-    modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, fit1.null = fit1.null)
+    modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, fit1.null = fit1.null, calc_overall = overall_fits)
 
     # Identified?
     val_id0 <- as.integer(modelfit$id0)

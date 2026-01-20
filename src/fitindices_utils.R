@@ -111,7 +111,7 @@ getmax <- function(x){
 ################################################################
 # this includes the whole function in short
 ################################################################
-getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
+getfit <- function(fit1, y, y.2, nvar, Nt, cfi=T, fit1.null=NA, calc_overall=FALSE){
   #nvar <- 6
   samps <- getmcmc(fit1,jags=F) # function extracts samples from jags or stan
   nsamps <- dim(samps)[1]
@@ -122,9 +122,10 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
   
   # identification constraint
   id0 <- (dim(y)[1]*dim(y)[3]<(dim(y)[2]+1))
+  cat("Identification for overall fit index is:", id0, "| Dimensions y:", dim(y), "\n")
 
-  # Debugging for NA values
-  cat("DEBUG: id0 value is:", id0, "| Dimensions y:", dim(y), "\n")
+  # Inicializamos NA por defecto para mantener consistencia
+  BRMSEA.devm.1 <- BMc.devm.1 <- BGamma.devm.1 <- BadjGamma.devm.1 <- BCFI.devm.1 <- BTLI.devm.1 <- rep(NA, nsamps)
   
   #######################################################################
   # parameter extraction
@@ -145,74 +146,117 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
   # matrices for loglik and model implied covariance matrices
   #######################################################################
   
+  # Legacy code - not used
   #lym.2 <- array(0,c(nvar,2,nsamps)) #HB: added for comparison at the end
   #epsm.2 <- array(0,c(nvar,nvar,nsamps)) #HB: added for comparison at the end
-  lym.1 <- array(0,c(nvar*Nt,2*Nt,nsamps))
-  epsm.1 <- epsm.null.1 <- array(0,c(nvar*Nt,nvar*Nt,nsamps))
-  zetam.1 <- etam.1 <-  array(0,c(2*Nt,2*Nt,nsamps))
-  
   #etam.2 <- array(0,c(Nt,2,2,nsamps)) # HB: added etam.2.stan for comparison (can be deleted after testing)
-  D.1  <- array(0,c(2*Nt,2*Nt,nsamps)) # HB: added D.1.stan for comparison (can be deleted after testing)
-  sigmay.1 <- sigmay.null.1 <- array(NA,c(nvar*Nt,nvar*Nt,nsamps)) # HB: this is overall
+
+  # Overall matrices 
+  if(calc_overall){
+    lym.1 <- array(0,c(nvar*Nt,2*Nt,nsamps))
+    epsm.1 <- epsm.null.1 <- array(0,c(nvar*Nt,nvar*Nt,nsamps))
+    zetam.1 <- etam.1 <-  array(0,c(2*Nt,2*Nt,nsamps))
+    D.1  <- array(0,c(2*Nt,2*Nt,nsamps)) # HB: added D.1.stan for comparison (can be deleted after testing)
+    sigmay.1 <- sigmay.null.1 <- array(NA,c(nvar*Nt,nvar*Nt,nsamps)) # HB: this is overall
+  }
+
+  # Time-specific initializations
   sigmay.2 <- sigmay.null.2 <- array(NA,c(Nt,nvar,nvar,nsamps)) # HB added: this is time-specific
   m1 <- matrix(1,2,2)
-  
-  for(j in 1:nsamps){#j<-1
-    for(m in 1:Nt){#j<-1
-      epsm.1[1:6+(m-1)*nvar,1:6+(m-1)*nvar,j] <- diag(6)*unlist(sigma.eps[j,])^2
-    }
+
+
+  for(j in 1:nsamps){
     
-    if(cfi==T){
-      for(m in 1:Nt){#j<-1
-        epsm.null.1[1:6+(m-1)*nvar,1:6+(m-1)*nvar,j] <- diag(6)*unlist(sigma.eps.null[j,])^2
+    # -------------------------------------------------------------
+    # 1. CREACIÓN DE MATRICES TEMPORALES (solo para iteración j)
+    # -------------------------------------------------------------
+    # Estas matrices se sobrescriben en cada vuelta, ahorrando RAM.
+    
+    # Inicializar temporales
+    lym_j <- matrix(0, nvar*Nt, 2*Nt)
+    epsm_j <- matrix(0, nvar*Nt, nvar*Nt)
+    epsm_null_j <- matrix(0, nvar*Nt, nvar*Nt)
+    zetam_j <- etam_j <- matrix(0, 2*Nt, 2*Nt)
+    D_j <- matrix(0, 2*Nt, 2*Nt)
+    
+    # Rellenar matrices temporales (Misma lógica exacta que antes)
+    for(m in 1:Nt){
+      idx_m <- (1:6) + (m-1)*nvar
+      epsm_j[idx_m, idx_m] <- diag(6)*unlist(sigma.eps[j,])^2
+      
+      if(cfi){
+         epsm_null_j[idx_m, idx_m] <- diag(6)*unlist(sigma.eps.null[j,])^2
       }
+      
+      idx_lym_r <- c(1,4) + (m-1)*6
+      idx_lym_c <- (m-1)*2 + 1:2
+      lym_j[idx_lym_r, idx_lym_c] <- diag(2)
+      
+      for(k in 2:3){ lym_j[k+(m-1)*6, (m-1)*2+1] <- unlist(ly1[j,k-1]) }
+      for(k in 5:6){ lym_j[k+(m-1)*6, (m-1)*2+2] <- unlist(ly1[j,k-2]) }
     }
-    #epsm.null.1[,,1]
     
+    for(m in 1:(Nt-1)){
+      idx_r <- (m-1)*2 + 2 + 1:2
+      idx_c <- (m-1)*2 + 1:2
+      D_j[idx_r, idx_c] <- matrix(0, 2, 2) - m1*unlist(b1[j,])
+    }
+    diag(D_j) <- rep(1, 2*Nt)
     
     for(m in 1:Nt){
-      lym.1[c(1,4)+(m-1)*6,(m-1)*2+1:2,j] <- diag(2)
-      for(k in 2:3){lym.1[k+(m-1)*6,(m-1)*2+1,j] <- unlist(ly1[j,k-1])}
-      for(k in 5:6){lym.1[k+(m-1)*6,(m-1)*2+2,j] <- unlist(ly1[j,k-2])}
+      idx_zeta <- (m-1)*2 + 1:2
+      zetam_j[idx_zeta, idx_zeta] <- m1*unlist(sigma.eta1[j,])
     }
     
-    for(m in 1:(Nt-1)){#m<-1
-      D.1[(m-1)*2+2+1:2,(m-1)*2+1:2,j] = matrix(0, nrow = 2, ncol = 2)-m1*unlist(b1[j,])##diag(2)-m1*unlist(b1[j,])#E)# #### CHANGED. WHY it was commented?
-    }
-    diag(D.1[,,j]) <- rep(1,2*Nt)
+    # Cálculo algebraico (Purista)
+    invD_op <- solve(D_j)
+    etam_j <- invD_op %*% zetam_j %*% t(invD_op)
     
-    for(m in 1:Nt){#m<-1
-      zetam.1[(m-1)*2+1:2,(m-1)*2+1:2,j] = m1*unlist(sigma.eta1[j,])#CHANGED
-    }
-    
-    invD.op <- solve(D.1[,,j])# + t(solve(D.1[,,j])))/2 #HB: CHANGED
-    
-    etam.1[,,j] <- invD.op %*% zetam.1[,,j] %*% t(invD.op)  #CHANGED
-    
-    for(m in 1:Nt){### ADDED loop
-      etam.1[(m-1)*2+1:2,(m-1)*2+1:2,j] = etam.1[(m-1)*2+1:2,(m-1)*2+1:2,j] + m1*unlist(sigma.eta2[j,])#CHANGED
+    for(m in 1:Nt){
+      idx_eta <- (m-1)*2 + 1:2
+      etam_j[idx_eta, idx_eta] <- etam_j[idx_eta, idx_eta] + m1*unlist(sigma.eta2[j,])
     }
     
-    # HB: final matrices
-    sigmay.1[,,j] = lym.1[,,j] %*% etam.1[,,j] %*% t(lym.1[,,j])+ epsm.1[,,j]
-    sigmay.1[,,j] = ((sigmay.1[,,j]+ t(sigmay.1[,,j]))/2) #HB: CHANGED
+    # Matriz implícita FINAL (Temporal para esta iteración)
+    sigmay_1_j <- lym_j %*% etam_j %*% t(lym_j) + epsm_j
+    sigmay_1_j <- (sigmay_1_j + t(sigmay_1_j)) / 2
     
     
+    # -------------------------------------------------------------
+    # 2. GUARDAR DATOS SEGÚN CONFIGURACIÓN
+    # -------------------------------------------------------------
     
-    #HB: added for myself
-    for(m in 1:Nt){#m<-1
-      sigmay.2[m,,,j] <- sigmay.1[1:nvar+(m-1)*nvar,1:nvar+(m-1)*nvar,j]
-    }
-    
-    
-    if(cfi==T){
-      sigmay.null.1[,,j] = epsm.null.1[,,j]
-      sigmay.null.1[,,j] = ((sigmay.null.1[,,j]+ t(sigmay.null.1[,,j]))/2) #HB: CHANGED
-      for(m in 1:Nt){#m<-1
-        sigmay.null.2[m,,,j] <- sigmay.null.1[1:nvar+(m-1)*nvar,1:nvar+(m-1)*nvar,j]
+    # A) Overall (Solo si se pide)
+    if(calc_overall){
+      lym.1[,,j] <- lym_j
+      epsm.1[,,j] <- epsm_j
+      zetam.1[,,j] <- zetam_j
+      etam.1[,,j] <- etam_j
+      D.1[,,j] <- D_j
+      sigmay.1[,,j] <- sigmay_1_j
+      
+      if(cfi){
+         epsm.null.1[,,j] <- epsm_null_j
+         # Cálculo Null Overall
+         sigmay_null_1_j <- epsm_null_j # En modelo nulo simple, sigmay = epsilon
+         sigmay_null_1_j <- (sigmay_null_1_j + t(sigmay_null_1_j)) / 2
+         sigmay.null.1[,,j] <- sigmay_null_1_j
       }
+    } else if(cfi) {
+        # Si NO es overall pero necesitamos null para time-specific
+        sigmay_null_1_j <- epsm_null_j 
+        sigmay_null_1_j <- (sigmay_null_1_j + t(sigmay_null_1_j)) / 2
     }
-    #sigmay.null.2[1,,,1]
+    
+    # B) Extraer Time-Specific (Siempre necesario)
+    for(m in 1:Nt){
+       idx_sub <- (1:nvar) + (m-1)*nvar
+       sigmay.2[m,,,j] <- sigmay_1_j[idx_sub, idx_sub]
+       
+       if(cfi){
+         sigmay.null.2[m,,,j] <- sigmay_null_1_j[idx_sub, idx_sub]
+       }
+    }
     
   }
   
@@ -222,15 +266,50 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
   ################################################################################
   tym <- cbind(rep(0,nsamps),samps[,paste0("ty[",1:2,"]")],rep(0,nsamps),samps[,paste0("ty[",3:4,"]")])
   kam <- samps[,paste0("ka[",1:2,"]")]
-  muy.1 <- matrix(NA,nsamps,nvar*Nt)
+  
+  # Solo inicializamos muy.1 si vamos a calcular overall
+  if(calc_overall) {
+      muy.1 <- matrix(NA,nsamps,nvar*Nt)
+  } else {
+      muy.1 <- NULL # Opcional, para que quede claro que no se usa
+  }
+  
   muy.2 <-  array(NA,c(nvar,Nt,nsamps))
+  
   for(j in 1:nsamps){
-    muy.1[j,] <- rep(unlist(tym[j,]),Nt)+(lym.1[,,j])%*%(rep(unlist(kam[j,]),Nt))
     
-    for(m in 1:Nt){
-      muy.2[,m,j] <- muy.1[j,1:nvar+(m-1)*nvar]
+    # 1. Calcular Mean Structure Global SOLO si se pide (Ruta Lenta)
+    if(calc_overall){
+        muy.1[j,] <- rep(unlist(tym[j,]),Nt)+(lym.1[,,j])%*%(rep(unlist(kam[j,]),Nt))
+        # Derivar muy.2 de muy.1 (Método original)
+        for(m in 1:Nt){
+             muy.2[,m,j] <- muy.1[j,1:nvar+(m-1)*nvar]
+        }
+    } else {
+        # 2. Calcular Mean Structure Time-Specific DIRECTAMENTE (Ruta Rápida)
+        # Reconstruimos lym local para este tiempo m
+        # mu_y(t) = tau_y + Lambda_y * alpha(t) ? 
+        # En tu modelo DSEM_VAR1_RI, la media suele ser constante o dependiente de kappa.
+        # Original: rep(unlist(tym[j,]),Nt) + lym.1 %*% rep(unlist(kam[j,]),Nt)
+        # Esto implica que la media es ty + Lambda * ka en CADA tiempo.
+        
+        # Vector ty para un tiempo (6 variables)
+        ty_j <- unlist(tym[j,]) 
+        # Vector ka (2 factores)
+        ka_j <- unlist(kam[j,])
+        
+        for(m in 1:Nt){
+            # Reconstruir Lambda local (lym_local) de 6x2
+            lym_local <- matrix(0, 6, 2)
+            lym_local[c(1,4), 1:2] <- diag(2)
+            lym_local[2:3, 1] <- unlist(ly1[j, 1:2])
+            lym_local[5:6, 2] <- unlist(ly1[j, 3:4])
+            
+            # Calcular muy para este tiempo m
+            # muy.2[,m,j] = ty + Lambda * ka
+            muy.2[,m,j] <- ty_j + lym_local %*% ka_j
+        }
     }
-    
   }
   
   # nullmodel
@@ -242,17 +321,27 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
       }
     }
     
-    muy.null.1 <- matrix(NA,nsamps,nvar*Nt)
+    if(calc_overall){
+        muy.null.1 <- matrix(NA,nsamps,nvar*Nt)
+    }
+    
     muy.null.2 <-  array(NA,c(nvar,Nt,nsamps))
+    
     for(j in 1:nsamps){
-      muy.null.1[j,] <- unlist(tym.null[j,])
+      # Vector completo de medias nulas (todas las variables * todos los tiempos)
+      temp_null_means <- unlist(tym.null[j,])
+      
+      if(calc_overall){
+         muy.null.1[j,] <- temp_null_means
+      }
       
       for(m in 1:Nt){
-        muy.null.2[,m,j] <- muy.null.1[j,1:nvar+(m-1)*nvar]
+        # Extraer el trozo correspondiente al tiempo m
+        idx_start <- 1 + (m-1)*nvar
+        idx_end <- m*nvar
+        muy.null.2[,m,j] <- temp_null_means[idx_start:idx_end]
       }
     }
-    #muy.null.2[,2,1]
-    #tym.null[1,1:6+6]
   }
   
   
@@ -271,11 +360,15 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
   # 2a. global loglikelihood and chisq
   ################################################################
   
+  # Inicializar con NA por defecto
   logliki.1 <- logliki.null.1<- array(NA,c(nsamps,N))
   chisqs.1 <- loglik.1 <- chisqs.null.1 <- loglik.null.1 <- rep(NA,nsamps)
   logliksat.1 <- NA
+  pd.1 <- NA
+  pd.null.1 <- NA
   
-  if(id0==T){
+  # Solo calcular si el usuario lo pide Y si es matemáticamente posible (id0)
+  if(calc_overall && id0==T){
     for(j in 1:nsamps){#j<-1
       logliki.1[j,] <- getloglik(y.2,muy.1[j,],sigmay.1[,,j])
     }
@@ -349,13 +442,13 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
     }
   }
   
-  if(id0==T){
-    loo.1 <- loo(logliki.1, cores = 4)## ALSO TRY WITH STAN IMPORT
-    pd.1 <- loo.1$estimates["p_loo",1]  ## IMPORTANT!!! FROM R
+  if(calc_overall && id0==T){
+    loo.1 <- loo(logliki.1, cores = 4)
+    pd.1 <- loo.1$estimates["p_loo",1]
     
     if(cfi==T){
-      loo.null.1 <- loo(logliki.null.1, cores = 4)## ALSO TRY WITH STAN IMPORT
-      pd.null.1 <- loo.null.1$estimates["p_loo",1]  ## IMPORTANT!!! FROM R
+      loo.null.1 <- loo(logliki.null.1, cores = 4)
+      pd.null.1 <- loo.null.1$estimates["p_loo",1]
     }  
   }
   
@@ -370,7 +463,7 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
   # 4. actual model fit
   ################################################################
   # version 1 is overall model fit
-  if(id0==T){
+  if(calc_overall && id0==T){
     BRMSEA.devm.1 <- sqrt(getmax((chisqs.1-pstar.1)/((pstar.1-pd.1)*N)))
     BMc.devm.1       <- exp(-1/(2*N)*(chisqs.1-pstar.1))
     BGamma.devm.1    <- p.1/(p.1+2/N*(chisqs.1-pstar.1))     
@@ -381,10 +474,6 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
                         (chisqs.1-pd.1)/(pstar.1-pd.1))/(
                           (chisqs.null.1-pd.null.1)/(pstar.1-pd.null.1)-1)
     }
-    
-    #addbove: chisqs.null.1
-    
-    
   }else{
     BRMSEA.devm.1 <- BMc.devm.1 <- BGamma.devm.1 <- BadjGamma.devm.1 <- BCFI.devm.1 <- BTLI.devm.1 <- rep(NA,nsamps)
   }
@@ -409,8 +498,9 @@ getfit <- function(fit1,y,y.2,nvar,Nt,cfi=T,fit1.null=NA){
   
   # Clean outputs and id0 value
   out <- list(
-    overall = round(c(mean(BRMSEA.devm.1),mean(BGamma.devm.1),mean(BadjGamma.devm.1),
-                      mean(BMc.devm.1), mean(BCFI.devm.1),mean(BTLI.devm.1)),3),
+    overall = round(c(mean(BRMSEA.devm.1, na.rm=TRUE), mean(BGamma.devm.1, na.rm=TRUE),
+                      mean(BadjGamma.devm.1, na.rm=TRUE), mean(BMc.devm.1, na.rm=TRUE), 
+                      mean(BCFI.devm.1, na.rm=TRUE), mean(BTLI.devm.1, na.rm=TRUE)),3),
     
     timepoint = round(cbind(apply(BRMSEA.devm.2,2,mean),apply(BGamma.devm.2,2,mean),
                             apply(BadjGamma.devm.2,2,mean), apply(BMc.devm.2,2,mean),

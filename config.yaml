@@ -3,6 +3,7 @@
 ##########################################################################################################
 
 # seed: 42
+# overall_fits: False
   
 # settings:
 #   "N": [30, 60, 90, 120, 150, 300]
@@ -27,13 +28,14 @@
 #########################################################################################################
 
 seed: 42
+overall_fits: FALSE
 
 settings:
   "N": [30]           # Solo 1 valor
   N_t: [5]          # Solo Nt pequeño
   M: [0, 0.3]       # 2 valores de misspecification
   T_event: [0.5]    # Solo 1 timing
-  R: 1              # Solo 2 réplicas
+  R: 5              # Solo 2 réplicas
 
 mcmc:
   chains: 2         # Reducir chains
