@@ -274,7 +274,9 @@ for (rep in 1:R) {
                      warmup = warmup_n,
                      cores = cores_n,
                      refresh = 0,
-                     control = stan_control_list) # <--- AÑADIDO
+                     control = stan_control_list,
+                     pars = c("ly","ty","sigmaeps","ka","beta1","sigmaeta1","sigmaeta2"),
+                     include = TRUE)
     
     fit1.null <- sampling(sm1.null, data = data.stan1,
                           iter = iter_n,
@@ -282,7 +284,9 @@ for (rep in 1:R) {
                           warmup = warmup_n,
                           cores = cores_n,
                           refresh = 0,
-                          control = stan_control_list) # <--- AÑADIDO
+                          control = stan_control_list,
+                          pars = c("ty","sigmaeps"),
+                          include = TRUE)
     
     # Extract convergence
     fit_summary <- summary(fit1)

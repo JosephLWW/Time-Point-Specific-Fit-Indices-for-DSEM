@@ -1,20 +1,51 @@
-seed: 42
-  
-settings:
-  "N": [30, 60, 90, 120, 150, 300]
-  N_t: [5, 10, 15, 25, 50, 75]
-  M: [0, 0.3, 0.6]  # Cross-loading magnitudes
-  
-  # T_event proportions based on N_t
-  T_event: [0.25, 0.5, 0.75]
-  # Replications (1 per core?) 355 cpus 64 cores per node
-  R: 1 # 355 cpus 64 cores per node
+##########################################################################################################
+# FULL SIMULATION SETTINGS
+##########################################################################################################
 
+# seed: 42
   
-  # Mapping T_event to N_t
-  # For N_t=5: T_event at floor(5*proportion) = 1, 2, 3
-  # For N_t=10: T_event at floor(10*proportion) = 2, 5, 7
-  # For N_t=15: T_event at floor(15*proportion) = 3, 7, 11
+# settings:
+#   "N": [30, 60, 90, 120, 150, 300]
+#   N_t: [5, 10, 15, 25, 50]
+#   M: [0, 0.3, 0.6]  # Cross-loading magnitudes
+#   T_event: [0.25, 0.5, 0.75]
+#   R: 1
+
+#   # Mapping T_event to N_t
+#   # For N_t=5: T_event at floor(5*proportion) = 1, 2, 3
+#   # For N_t=10: T_event at floor(10*proportion) = 2, 5, 7
+#   # For N_t=15: T_event at floor(15*proportion) = 3, 7, 11
+
+# mcmc:
+#   chains: 4
+#   iter: 3000
+#   warmup: 1500
+#   cores: 4
+
+#########################################################################################################
+# TEST SETTINGS
+#########################################################################################################
+
+seed: 42
+
+settings:
+  "N": [30]           # Solo 1 valor
+  N_t: [5]          # Solo Nt pequeño
+  M: [0, 0.3]       # 2 valores de misspecification
+  T_event: [0.5]    # Solo 1 timing
+  R: 1              # Solo 2 réplicas
+
+mcmc:
+  chains: 2         # Reducir chains
+  iter: 500         # Muy pocas iteraciones
+  warmup: 250
+  cores: 2
+
+#########################################################################################################
+
+output:
+  results_dir: "results/"
+  save_format: "sqlite"
 
 model_params:
   phi0_scale: 0.7
@@ -28,17 +59,4 @@ stan:
   model_file: "models/DSEM_VAR1_RI.stan"
   null_model_file: "models/DSEM_NULL.stan"
   params: ["ly", "sigmaeps", "sigmaeta1", "sigmaeta2", "ty", "ka", "beta1"]
-
-mcmc:
-  chains: 4
-  iter: 4000
-  warmup: 2000
-  cores: 4
-
-
-output:
-  results_dir: "results/"
-  save_format: "sqlite"
-
-
 
