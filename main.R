@@ -23,11 +23,7 @@ required_pkgs <- c(
 )
 
 for (pkg in required_pkgs) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-    cat("Installing", pkg, "...\n")
-    install.packages(pkg, lib = user_lib, repos = "https://cloud.r-project.org")
-    library(pkg, character.only = TRUE)
-  }
+  library(pkg, character.only = TRUE)
 }
 
 rstan_options(auto_write = TRUE)
@@ -47,12 +43,12 @@ source("src/fitindices_utils.R")
 
 ### GET SETTINGS FROM CONFIG FILE ###
 
-seed <- if(!is.null(config$seed)) config$seed else 42
+seed_base <- if(!is.null(config$seed)) config$seed else 42
 overall_fits <- if(!is.null(config$overall_fits)) config$overall_fits else FALSE
 N.all <- config$settings$N
 Nt.all <- config$settings$N_t
-size_miss <- config$settings$M
-T_event <- config$settings$T_event
+M_values <- config$settings$M
+T_event_proportions <- config$settings$T_event
 R <- config$settings$R  # replications per condition
 
 # MCMC
@@ -60,6 +56,23 @@ iter_n <- if(!is.null(config$mcmc$iter)) config$mcmc$iter else 2000
 chains_n <- if(!is.null(config$mcmc$chains)) config$mcmc$chains else 4
 warmup_n <- if(!is.null(config$mcmc$warmup)) config$mcmc$warmup else 1000
 cores_n <- if(!is.null(config$mcmc$cores)) config$mcmc$cores else 1
+
+##############################
+# Helpers
+##############################
+
+# Helper for appending to DB with retries
+db_append_retry <- function(con, table, df, retries = 40, sleep_sec = 0.2) {
+  for (k in seq_len(retries)) {
+    ok <- try({
+      DBI::dbAppendTable(con, table, df)
+      TRUE
+    }, silent = TRUE)
+    if (!inherits(ok, "try-error")) return(invisible(TRUE))
+    Sys.sleep(sleep_sec * k)
+  }
+  stop("DB write failed repeatedly (database locked?)")
+}
 
 ##########################
 # Model parameters
@@ -102,57 +115,52 @@ calculate_T_event <- function(N_t, proportion) {
 conditions_grid <- expand.grid(
   N = N.all,
   Nt = Nt.all,
-  M = size_miss,
-  T_event_prop = T_event,
+  M = M_values,
+  T_event_prop = T_event_proportions,
   stringsAsFactors = FALSE
 )
 
 ##########################
-# SLURM task ID & Run Configuration
+# Cluster Detection & Workload Manager
 ##########################
 
-# 1. Identificar la tarea individual (1, 2, 3...)
-rslurm_id <- as.numeric(Sys.getenv('SLURM_ARRAY_TASK_ID'))
-if (is.na(rslurm_id)) rslurm_id <- 1
-# Random pause to avoid crashing
-Sys.sleep(runif(1, min = 0, max = 5))
+is_cluster <- (!is.na(Sys.getenv("SLURM_JOB_ID", NA)) || 
+               !is.na(Sys.getenv("SLURM_ARRAY_TASK_ID", NA)))
 
-# 2. Identificar el "RUN" global (Debe ser IDÉNTICO para todas las tareas)
-# Intentamos leer la variable manual, si falla, usamos el ID del Job Array de Slurm
-run_id <- Sys.getenv("RUN_ID")
-
-if (run_id == "") {
-  # Fallback seguro: Usar el ID del Array Job (ej. 2933037)
-  # Este ID es compartido por todas las tareas del array
-  val_job_id <- Sys.getenv("SLURM_ARRAY_JOB_ID")
-  
-  if (val_job_id != "") {
-    run_id <- val_job_id
-  } else {
-    # Solo si no hay SLURM (local testing), usamos fecha
-    run_id <- format(Sys.time(), "%Y%m%d_%H%M%S")
-  }
+if (is_cluster) {
+  cat("Running on HPC cluster (SLURM detected)\n")
+  rslurm_id <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID", "1"))
+  run_id <- Sys.getenv("RUN_ID", "local_run")
+  job_id <- as.integer(Sys.getenv("SLURM_ARRAY_JOB_ID", "1"))
+} else {
+  cat("Running locally (no SLURM environment)\n")
+  rslurm_id <- 1
+  run_id <- format(Sys.time(), "%Y%m%d_%H%M%S")
+  job_id <- 1
 }
 
-job_id <- as.integer(Sys.getenv("SLURM_JOB_ID"))
-if (is.na(job_id)) job_id <- -1
+cat(sprintf("Job ID: %d | Run ID: %s\n", rslurm_id, run_id))
 
-# 3. Definir rutas
+##########################
+# Configuration
+##########################
+
+# Routes
 base_dir <- config$output$results_dir
-# Ahora run_dir será siempre igual para todo el array (ej. results/run_2933037)
+# (ej. results/run_2933037)
 run_dir  <- file.path(base_dir, paste0("run_", run_id))
 
-# 4. Crear directorio (con gestión de concurrencia básica)
-# showWarnings=FALSE evita errores si otra tarea ya creó la carpeta hace 1 milisegundo
+# Create dir. showWarnings=FALSE evita errores si otra tarea ya creó la carpeta hace 1 milisegundo
 if (!dir.exists(run_dir)) {
   dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
 }
 
 db_file <- file.path(run_dir, "fit_indices.sqlite")
+config$db_path <- db_file
 
 # Pequeña pausa aleatoria antes de conectar para evitar "thundering herd"
 # (que 100 tareas intenten crear el archivo .sqlite en el mismo microsegundo exacto)
-Sys.sleep(runif(1, min=0.1, max=2.0))
+Sys.sleep(runif(1, min=0.01, max=0.2))
 
 con <- DBI::dbConnect(RSQLite::SQLite(), db_file)
 
@@ -207,53 +215,101 @@ DBI::dbExecute(con, "
   );
 ")
 
-# Validate task ID
-if (rslurm_id > nrow(conditions_grid)) {
-  stop(paste("SLURM_ARRAY_TASK_ID", rslurm_id, "exceeds number of conditions", nrow(conditions_grid)))
-}
-
-# Get condition for this task (convert to numeric explicitly)
-cond <- conditions_grid[rslurm_id, ]
-N <- as.numeric(cond$N)
-Nt <- as.numeric(cond$Nt)
-M <- as.numeric(cond$M)
-T_event_prop <- as.numeric(cond$T_event_prop)
-t0 <- calculate_T_event(Nt, T_event_prop)
-
-# Create output directory
-dir.create("results", showWarnings = FALSE, recursive = TRUE)
-
-cat("========================================\n")
-cat("Condition ID:", rslurm_id, "\n")
-cat("N =", N, "| Nt =", Nt, "| M =", M, "| T_event =", T_event_prop, "| t0 =", t0, "\n")
-cat("Running", R, "replications...\n")
-cat("========================================\n")
-
 ##########################
-# Main loop: R replications for this condition
+# Task farm
 ##########################
 
-# Helper for appending to DB with retries
-db_append_retry <- function(con, table, df, retries = 20, sleep_sec = 0.5) {
-  for (k in seq_len(retries)) {
-    ok <- try({
-      DBI::dbAppendTable(con, table, df)
-      TRUE
-    }, silent = TRUE)
-    if (!inherits(ok, "try-error")) return(invisible(TRUE))
-    Sys.sleep(sleep_sec * k)
-  }
-  stop("DB write failed repeatedly (database locked?)")
+# Only load workload manager on cluster to avoid local dependencies
+if (is_cluster) {
+  source("src/workload_manager.R")
+  cat("Loaded workload_manager.R\n")
+  init_tasks_db(config$db_path, conditions_grid)
 }
 
-for (rep in 1:R) {
+############################
+# Conditions and execution
+############################
+
+# 1. Seed setup
+calculate_seed <- function(cond_row, seed_base, rep) {
+  N <- as.numeric(cond_row$N)
+  Nt <- as.numeric(cond_row$Nt)
+  M <- as.numeric(cond_row$M)
+  T_prop <- as.numeric(cond_row$T_event_prop)
   
+  condition_hash <- (
+    (N * 1) + 
+    (Nt * 1000) + 
+    (round(M * 100) * 100000) + 
+    (round(T_prop * 100) * 10000000)
+  ) %% 100000
+  
+  return(seed_base + condition_hash * 100000 + rep)
+}
+
+# 2. Bundle vs individual execution
+if (is_cluster) {
+  # CLUSTER MODE: Task farming system
+  # Worker requests bundle of conditions, executes all with loop
+  
+  bundle <- get_bundle(
+    db_path = config$db_path,
+    job_id = rslurm_id,
+    batch_size = 5,
+    n_jobs = 50,
+    conditions_grid = conditions_grid
+  )
+  
+  if (bundle$status == "empty") {
+    cat("✓ No pending tasks. This worker is done.\n")
+    q(save = "no")  # Exit cleanly
+  }
+  
+  # Now bundle$conditions contains multiple rows (1-5 conditions)
+  conditions_to_run <- bundle$conditions
+  
+} else {
+  # LOCAL MODE: Single condition (original behavior)
+  # For local testing: just run one condition
+  
+  if (rslurm_id > nrow(conditions_grid)) {
+    stop(sprintf("rslurm_id (%d) exceeds number of conditions (%d)",
+                 rslurm_id, nrow(conditions_grid)))
+  }
+  
+  conditions_to_run <- conditions_grid[rslurm_id, , drop = FALSE]
+  bundle <- list(bundle_id = sprintf("local_%d", rslurm_id), job_id = 1)
+}
+
+cat(sprintf("This worker will run %d condition(s)\n", nrow(conditions_to_run)))
+
+# 3. Execute all assigned conditions in loop
+# Outer loop: iterate over conditions in this worker's bundle
+for (cond_idx in seq_len(nrow(conditions_to_run))) {
+  
+  cond <- conditions_to_run[cond_idx, ]
+  
+  # Extraer parámetros de la fila actual
+  N <- as.numeric(cond$N)
+  Nt <- as.numeric(cond$Nt)
+  M <- as.numeric(cond$M)
+  T_event_prop <- as.numeric(cond$T_event_prop)
+  
+  # Si estamos en cluster, tenemos un condition_id real de la DB
+  condition_id <- if("condition_id" %in% names(cond)) cond$condition_id else NA
+  
+  t0 <- calculate_T_event(Nt, T_event_prop)
+  
+  cat(sprintf("\n>>> Processing Condition ID %s: N=%d, Nt=%d, M=%.2f\n", 
+              if(is.na(condition_id)) "?" else condition_id, N, Nt, M))
+  
+  # Inner loop: replications for this condition
   tryCatch({
+    for (rep in 1:R) {
+      current_seed <- calculate_seed(cond, seed_base, rep)
+      set.seed(current_seed)
     
     cat("Starting Replication", rep, "/", R, "...\n")
-    
-    # Set unique seed for this replication
-    set.seed(seed + rslurm_id * 100000 + rep)
     
     # Generate data
     ly1 <- matrix(0, 6, 2)
@@ -369,22 +425,22 @@ for (rep in 1:R) {
     
     cat("Replication", rep, "/", R, "completed successfully.\n")
 
-  }, error = function(e) {
-    # --- MANEJO DE ERROR ---
-    # Si ocurre cualquier error (incluido el de Cholesky si escapa de getfit), 
-    # se imprime pero el loop continúa a la siguiente replicación.
-    cat("ERROR in Replication", rep, ":", e$message, "\n")
-    
-    # Opcional: Escribir registro de error en DB si tienes una tabla de logs
-    # O simplemente dejar que siga
-  })
-  # --- FIN TRYCATCH ---
+  }
   
-} # end replications loop
+  # If cluster: mark task as done
+  if (is_cluster && !is.na(condition_id)) {
+    mark_condition_completed(config$db_path, condition_id)
+    cat(sprintf("Condition %d marked as completed in Task DB\n", condition_id))
+  }
+
+  }, error = function(e) {
+    cat(sprintf("Error in condition %s: %s\n", condition_id, e$message))
+    if (is_cluster && !is.na(condition_id)) {
+      mark_condition_completed(config$db_path, condition_id, error_msg = e$message)
+    }
+  })
+  
+} # Fin loop condiciones
 
 # Close DB connection
 DBI::dbDisconnect(con)
-
-cat("========================================\n")
-cat("Condition", rslurm_id, "finished successfully.\n")
-cat("========================================\n")
