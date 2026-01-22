@@ -255,7 +255,7 @@ if (is_cluster) {
   bundle <- get_bundle(
     db_path = config$db_path,
     job_id = rslurm_id,
-    batch_size = 5,
+    batch_size = 3,
     n_jobs = 50,
     conditions_grid = conditions_grid
   )
@@ -444,3 +444,5 @@ for (cond_idx in seq_len(nrow(conditions_to_run))) {
 
 # Close DB connection
 DBI::dbDisconnect(con)
+
+cat("(Ignore if running locally) worker finished all assigned conditions.\n")

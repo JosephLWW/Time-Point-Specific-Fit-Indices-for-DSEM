@@ -12,7 +12,7 @@
 # 1. INITIALIZATION: Create Tasks Database Table
 # ============================================================================
 
-init_tasks_db <- function(db_path, conditions_grid, batch_size = 5) {
+init_tasks_db <- function(db_path, conditions_grid, batch_size = 3) {
   require(RSQLite)
   
   db <- dbConnect(RSQLite::SQLite(), db_path)
@@ -64,7 +64,7 @@ init_tasks_db <- function(db_path, conditions_grid, batch_size = 5) {
 # 2. WORKER FUNCTION: Request and Execute Bundle
 # ============================================================================
 
-get_bundle <- function(db_path, job_id, batch_size = 5, 
+get_bundle <- function(db_path, job_id, batch_size = 3, 
                        n_jobs = 50, conditions_grid = NULL) {
   require(RSQLite)
   
