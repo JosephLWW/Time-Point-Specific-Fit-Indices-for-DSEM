@@ -292,7 +292,9 @@ while(keep_working) {
         (round(T_prop * 100) * 10000000)
       ) %% 100000
       
-      return(seed_base + condition_hash * 100000 + rep)
+      val <- (seed_base + condition_hash * 100000 + rep)
+      # Wrap around using modulo of max integer (approx 2.1 billion)
+      return(as.integer(val %% 2147483647))
     }
 
     # 2. Bundle vs individual execution

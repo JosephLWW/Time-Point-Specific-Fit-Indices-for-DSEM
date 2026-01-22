@@ -135,6 +135,7 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
         ))
         
       }, error = function(e) {
+        try(dbRollback(db), silent = TRUE)
         retry_count <<- retry_count + 1
         
         if (retry_count < max_retries) {
