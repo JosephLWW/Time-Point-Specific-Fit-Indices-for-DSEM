@@ -371,28 +371,46 @@ for (cond_idx in seq_len(nrow(conditions_to_run))) {
     idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
     
     # Overall
+    # Extraer valores y forzar a numeric simple (sin atributos)
     overall_vals <- as.numeric(modelfit$overall)
     names(overall_vals) <- idx_names
-    
+
+    # Asegurar que son SIEMPRE numeric simples (no lista, no raw)
+    brmsea_val <- as.numeric(overall_vals["BRMSEA"])
+    bgamma_val <- as.numeric(overall_vals["BGamma"])
+    badjgamma_val <- as.numeric(overall_vals["BadjGamma"])
+    bmc_val <- as.numeric(overall_vals["BMc"])
+    bcfi_val <- as.numeric(overall_vals["BCFI"])
+    btli_val <- as.numeric(overall_vals["BTLI"])
+
+    # Si alguno es NA/NULL, asignar NA explícitamente
+    if (is.null(brmsea_val) || length(brmsea_val) == 0) brmsea_val <- NA_real_
+    if (is.null(bgamma_val) || length(bgamma_val) == 0) bgamma_val <- NA_real_
+    if (is.null(badjgamma_val) || length(badjgamma_val) == 0) badjgamma_val <- NA_real_
+    if (is.null(bmc_val) || length(bmc_val) == 0) bmc_val <- NA_real_
+    if (is.null(bcfi_val) || length(bcfi_val) == 0) bcfi_val <- NA_real_
+    if (is.null(btli_val) || length(btli_val) == 0) btli_val <- NA_real_
+
     overall_row <- data.frame(
       run_id = run_id,
       job_id = job_id,
       array_id = rslurm_id,
-      rep = rep,
-      N = N,
-      Nt = Nt,
-      M = M,
-      T_event_prop = T_event_prop,
-      t0 = t0,
-      id0 = val_id0,
+      rep = as.integer(rep),
+      N = as.integer(N),
+      Nt = as.integer(Nt),
+      M = as.numeric(M),
+      T_event_prop = as.numeric(T_event_prop),
+      t0 = as.integer(t0),
+      id0 = as.integer(val_id0),
       conv_max_rhat = as.numeric(conv),
-      BRMSEA = overall_vals["BRMSEA"],
-      BGamma = overall_vals["BGamma"],
-      BadjGamma = overall_vals["BadjGamma"],
-      BMc = overall_vals["BMc"],
-      BCFI = overall_vals["BCFI"],
-      BTLI = overall_vals["BTLI"],
-      created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+      BRMSEA = brmsea_val,
+      BGamma = bgamma_val,
+      BadjGamma = badjgamma_val,
+      BMc = bmc_val,
+      BCFI = bcfi_val,
+      BTLI = btli_val,
+      created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      stringsAsFactors = FALSE
     )
     
     # Time-point specific
