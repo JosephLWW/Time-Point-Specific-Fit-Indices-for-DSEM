@@ -70,8 +70,8 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
   
   db <- dbConnect(RSQLite::SQLite(), db_path)
   
-  # ← AÑADIR tryCatch AQUÍ para asegurar cierre
   tryCatch({
+    # Aumentamos timeout para esperar si la DB está bloqueada (IMMEDIATE lock)
     dbExecute(db, "PRAGMA busy_timeout = 60000")
     
     max_retries <- 20
@@ -79,8 +79,13 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
     
     while (retry_count < max_retries) {
       tryCatch({
-        dbBegin(db)
+        # ---------------------------------------------------------
+        # CAMBIO 1: Usar BEGIN IMMEDIATE en lugar de dbBegin()
+        # Esto adquiere el lock de escritura ANTES de leer.
+        # ---------------------------------------------------------
+        dbExecute(db, "BEGIN IMMEDIATE")
         
+        # 1. LEER las tareas pendientes
         pending <- dbGetQuery(db, "
           SELECT condition_id, N, Nt, M, T_event_prop
           FROM tasks 
@@ -89,6 +94,7 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
           LIMIT ?
         ", params = list(batch_size))
         
+        # Si no hay tareas, rollback y salir
         if (nrow(pending) == 0) {
           dbRollback(db)
           return(list(
@@ -100,25 +106,31 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
           ))
         }
         
+        # 2. PREPARAR IDs PARA EL UPDATE
         condition_ids <- pending$condition_id
         
-        dbExecute(db, "
+        # Generar string de interrogaciones para SQL: "?, ?, ?"
+        placeholders <- paste(rep("?", length(condition_ids)), collapse = ",")
+        
+        # ---------------------------------------------------------
+        # CAMBIO 2: UPDATE directo usando los IDs recuperados
+        # Es más seguro y rápido que volver a hacer un sub-SELECT
+        # ---------------------------------------------------------
+        sql_update <- sprintf("
           UPDATE tasks 
           SET status = 1, 
               job_assigned_to = ?, 
               started_at = datetime('now')
-          WHERE condition_id IN (
-            SELECT condition_id FROM (
-              SELECT condition_id FROM tasks 
-              WHERE status = 0
-              ORDER BY condition_id
-              LIMIT ?
-            )
-          )
-        ", params = list(job_id, batch_size))
+          WHERE condition_id IN (%s)
+        ", placeholders)
         
+        # Ejecutar UPDATE pasando job_id primero, y luego los IDs
+        dbExecute(db, sql_update, params = c(job_id, condition_ids))
+        
+        # 3. COMMIT (Liberar el lock)
         dbCommit(db)
         
+        # Generar ID del bundle para logging
         bundle_id <- sprintf("job%03d_batch%04d", job_id, min(condition_ids))
         
         cat(sprintf(
@@ -135,11 +147,14 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
         ))
         
       }, error = function(e) {
+        # Si falla (ej. Database Locked), hacemos rollback y reintentamos
         try(dbRollback(db), silent = TRUE)
         retry_count <<- retry_count + 1
         
         if (retry_count < max_retries) {
-          wait_time <- 0.5 * (2 ^ (retry_count - 1))
+          # Backoff exponencial con un poco de "jitter" (aleatoriedad) ayuda mucho
+          wait_time <- (0.5 * (2 ^ (retry_count - 1))) + runif(1, 0, 0.5)
+          
           cat(sprintf("DB lock (retry %d/%d, waiting %.1fs): %s\n", 
                       retry_count, max_retries, wait_time, conditionMessage(e)))
           Sys.sleep(wait_time)
@@ -154,7 +169,6 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
     if (exists("db") && dbIsValid(db)) dbDisconnect(db)
   })
 }
-
 
 
 # ============================================================================

@@ -34,6 +34,7 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "Array ID: $SLURM_ARRAY_TASK_ID"
 echo "=========================================="
 
+sleep $((RANDOM % 20))
 # Ejecutar R (Sin redefinir RUN_ID)
 Rscript main.R
 
