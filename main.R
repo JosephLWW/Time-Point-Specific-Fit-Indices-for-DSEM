@@ -234,26 +234,53 @@ if (is_cluster) {
 }
 
 ############################
+# Helper functions (DEFINIR UNA SOLA VEZ ANTES DEL WHILE)
+############################
+
+calculate_seed <- function(cond_row, seed_base, rep) {
+  N <- as.numeric(cond_row$N)
+  Nt <- as.numeric(cond_row$Nt)
+  M <- as.numeric(cond_row$M)
+  T_prop <- as.numeric(cond_row$T_event_prop)
+  
+  condition_hash <- (
+    (N * 1) + 
+    (Nt * 1000) + 
+    (round(M * 100) * 100000) + 
+    (round(T_prop * 100) * 10000000)
+  ) %% 100000
+  
+  val <- (seed_base + condition_hash * 100000 + rep)
+  return(as.integer(val %% 2147483647))
+}
+
+clean_val <- function(x) {
+  if (is.null(x) || length(x) == 0 || is.nan(x)) return(NA_real_)
+  val <- as.numeric(unlist(x))[1]
+  return(val)
+}
+
+############################
 # While Loop
 ############################
 keep_working <- TRUE
 while(keep_working) {
 
   ############################
-  # Get bundle of conditions
+  # Get bundle of conditions (UNA SOLA VEZ)
   ############################
   if (is_cluster) {
     bundle <- get_bundle(
       db_path = config$db_path,
       job_id = rslurm_id,
-      batch_size = 3,  # ← 3 condiciones por viaje
+      batch_size = 3,
       n_jobs = 50
     )
     
     if (bundle$status == "empty") {
       cat("✓ No pending tasks. Worker finished.\n")
       keep_working <- FALSE
-      break # SALIR DEL BUCLE WHILE
+      break
     }
     
     conditions_to_run <- bundle$conditions
@@ -263,102 +290,37 @@ while(keep_working) {
     # LOCAL MODE: Solo una vuelta con la condición indicada
     if (rslurm_id > nrow(conditions_grid)) stop("rslurm_id out of bounds")
     conditions_to_run <- conditions_grid[rslurm_id, , drop = FALSE]
-    keep_working <- FALSE # En local solo hacemos una pasada
+    keep_working <- FALSE
   }
 
   ############################
   # Process conditions in the current bundle
   ############################
-
+  
   for (cond_idx in seq_len(nrow(conditions_to_run))) {
     
     cond <- conditions_to_run[cond_idx, ]
-
-    ############################
-    # Conditions and execution
-    ############################
-
-    # 1. Seed setup
-    calculate_seed <- function(cond_row, seed_base, rep) {
-      N <- as.numeric(cond_row$N)
-      Nt <- as.numeric(cond_row$Nt)
-      M <- as.numeric(cond_row$M)
-      T_prop <- as.numeric(cond_row$T_event_prop)
+    
+    # Extraer parámetros de la fila actual
+    N <- as.numeric(cond$N)
+    Nt <- as.numeric(cond$Nt)
+    M <- as.numeric(cond$M)
+    T_event_prop <- as.numeric(cond$T_event_prop)
+    
+    # Si estamos en cluster, tenemos un condition_id real de la DB
+    condition_id <- if("condition_id" %in% names(cond)) cond$condition_id else NA
+    
+    t0 <- calculate_T_event(Nt, T_event_prop)
+    
+    cat(sprintf("\n>>> Processing Condition ID %s: N=%d, Nt=%d, M=%.2f\n", 
+                if(is.na(condition_id)) "?" else condition_id, N, Nt, M))
+    
+    # Inner loop: replications for this condition
+    tryCatch({
+      for (rep in 1:R) {
+        current_seed <- calculate_seed(cond, seed_base, rep)
+        set.seed(current_seed)
       
-      condition_hash <- (
-        (N * 1) + 
-        (Nt * 1000) + 
-        (round(M * 100) * 100000) + 
-        (round(T_prop * 100) * 10000000)
-      ) %% 100000
-      
-      val <- (seed_base + condition_hash * 100000 + rep)
-      # Wrap around using modulo of max integer (approx 2.1 billion)
-      return(as.integer(val %% 2147483647))
-    }
-
-    # 2. Bundle vs individual execution
-    if (is_cluster) {
-      # CLUSTER MODE: Task farming system
-      # Worker requests bundle of conditions, executes all with loop
-      
-      bundle <- get_bundle(
-        db_path = config$db_path,
-        job_id = rslurm_id,
-        batch_size = 3,
-        n_jobs = 50,
-        conditions_grid = conditions_grid
-      )
-      
-      if (bundle$status == "empty") {
-        cat("✓ No pending tasks. This worker is done.\n")
-        q(save = "no")  # Exit cleanly
-      }
-      
-      # Now bundle$conditions contains multiple rows (1-5 conditions)
-      conditions_to_run <- bundle$conditions
-      
-    } else {
-      # LOCAL MODE: Single condition (original behavior)
-      # For local testing: just run one condition
-      
-      if (rslurm_id > nrow(conditions_grid)) {
-        stop(sprintf("rslurm_id (%d) exceeds number of conditions (%d)",
-                    rslurm_id, nrow(conditions_grid)))
-      }
-      
-      conditions_to_run <- conditions_grid[rslurm_id, , drop = FALSE]
-      bundle <- list(bundle_id = sprintf("local_%d", rslurm_id), job_id = 1)
-    }
-
-    cat(sprintf("This worker will run %d condition(s)\n", nrow(conditions_to_run)))
-
-    # 3. Execute all assigned conditions in loop
-    # Outer loop: iterate over conditions in this worker's bundle
-    for (cond_idx in seq_len(nrow(conditions_to_run))) {
-      
-      cond <- conditions_to_run[cond_idx, ]
-      
-      # Extraer parámetros de la fila actual
-      N <- as.numeric(cond$N)
-      Nt <- as.numeric(cond$Nt)
-      M <- as.numeric(cond$M)
-      T_event_prop <- as.numeric(cond$T_event_prop)
-      
-      # Si estamos en cluster, tenemos un condition_id real de la DB
-      condition_id <- if("condition_id" %in% names(cond)) cond$condition_id else NA
-      
-      t0 <- calculate_T_event(Nt, T_event_prop)
-      
-      cat(sprintf("\n>>> Processing Condition ID %s: N=%d, Nt=%d, M=%.2f\n", 
-                  if(is.na(condition_id)) "?" else condition_id, N, Nt, M))
-      
-      # Inner loop: replications for this condition
-      tryCatch({
-        for (rep in 1:R) {
-          current_seed <- calculate_seed(cond, seed_base, rep)
-          set.seed(current_seed)
-        
         cat("Starting Replication", rep, "/", R, "...\n")
         
         # Generate data
@@ -371,7 +333,7 @@ while(keep_working) {
         
         data.stan1 <- list(N = N, Nt = Nt, y = y)
         
-        # Parámetros de control para mejorar convergencia (Recomendación 2)
+        # Parámetros de control para mejorar convergencia
         stan_control_list <- list(adapt_delta = 0.95, max_treedepth = 12)
         
         # Fit models
@@ -403,7 +365,6 @@ while(keep_working) {
           beta_indices <- c(beta_indices, grep(params2[t1], param_names))
         }
         
-        # Protección si fit_summary falla o devuelve estructura vacía
         if(length(beta_indices) > 0) {
           conv <- max(fit_summary$summary[beta_indices, "Rhat"], na.rm = TRUE)
         } else {
@@ -411,8 +372,8 @@ while(keep_working) {
         }
         
         # Compute fit indices
-        # Si dMvn falla (retorna NA/-Inf), getfit manejará los NAs resultantes sin crashear
-        modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, fit1.null = fit1.null, calc_overall = overall_fits)
+        modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, 
+                          fit1.null = fit1.null, calc_overall = overall_fits)
 
         # Identified?
         val_id0 <- as.integer(modelfit$id0)
@@ -420,17 +381,8 @@ while(keep_working) {
         # Prepare results for DB
         idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
         
-        # Overall
-        # Función auxiliar para limpiar escalares
-        clean_val <- function(x) {
-          if (is.null(x) || length(x) == 0 || is.nan(x)) return(NA_real_)
-          val <- as.numeric(unlist(x))[1] # Forzar a escalar numérico
-          return(val)
-        }
-
         # Recogemos valores con seguridad
         raw_overall <- modelfit$overall
-        # Asegurar nombres por si acaso se pierden
         if(is.null(names(raw_overall))) names(raw_overall) <- idx_names
         
         overall_row <- data.frame(
@@ -458,7 +410,6 @@ while(keep_working) {
         # Time-point specific
         tp_mat <- modelfit$timepoint
         
-        # Forzar conversión a matriz numérica estricta antes de data.frame
         if (is.list(tp_mat)) {
             tp_mat <- do.call(cbind, lapply(seq_len(ncol(tp_mat)), function(i) unlist(tp_mat[,i])))
         }
@@ -466,17 +417,14 @@ while(keep_working) {
         tp_df <- as.data.frame(tp_mat, stringsAsFactors = FALSE)
         colnames(tp_df) <- idx_names
         
-        # Asegurar que TODAS las columnas son numéricas (sin listas)
         for(col in names(tp_df)) {
             if(is.list(tp_df[[col]])) {
-                tp_df[[col]] <- unlist(tp_df[[col]]) # Aplanar listas a vectores
+                tp_df[[col]] <- unlist(tp_df[[col]])
             }
             tp_df[[col]] <- as.numeric(tp_df[[col]])
         }
         
         tp_df$time <- seq_len(Nt)
-        
-        # Asegurar tipos del resto de columnas metadatos
         tp_df$run_id <- as.character(run_id)
         tp_df$job_id <- as.integer(job_id)
         tp_df$array_id <- as.integer(rslurm_id)
@@ -487,17 +435,16 @@ while(keep_working) {
         tp_df$T_event_prop <- as.numeric(T_event_prop)
         tp_df$t0 <- as.integer(t0)
         tp_df$id0 <- as.integer(val_id0)
-        tp_df$conv_max_rhat <- clean_val(conv) # Usar la funcion clean_val definida arriba
+        tp_df$conv_max_rhat <- clean_val(conv)
         
-        # Reorder columns
         tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","Nt","M","T_event_prop","t0","id0","conv_max_rhat", idx_names)]
+        
         DBI::dbWithTransaction(con, {
           db_append_retry(con, "fit_overall", overall_row)
           db_append_retry(con, "fit_timepoint", tp_df)
         })
         
         cat("Replication", rep, "/", R, "completed successfully.\n")
-
       }
       
       # If cluster: mark task as done
@@ -506,16 +453,17 @@ while(keep_working) {
         cat(sprintf("Condition %d marked as completed in Task DB\n", condition_id))
       }
 
-      }, error = function(e) {
-        cat(sprintf("Error in condition %s: %s\n", condition_id, e$message))
-        if (is_cluster && !is.na(condition_id)) {
-          mark_condition_completed(config$db_path, condition_id, error_msg = e$message)
-        }
-      })
-      
-    } # Fin loop condiciones
-  } # Fin loop bundle
-  if(is_cluster) Sys.sleep(1) # Short pause before next bundle
+    }, error = function(e) {
+      cat(sprintf("Error in condition %s: %s\n", condition_id, e$message))
+      if (is_cluster && !is.na(condition_id)) {
+        mark_condition_completed(config$db_path, condition_id, error_msg = e$message)
+      }
+    })
+    
+  } # Fin loop condiciones
+  
+  if(is_cluster) Sys.sleep(1)
+  
 } # Fin while
 
 # Close DB connection
