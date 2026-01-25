@@ -274,7 +274,7 @@ while(keep_working) {
       db_path = config$db_path,
       job_id = rslurm_id,
       batch_size = 3,
-      n_jobs = 50
+      n_jobs = 100
     )
     
     if (bundle$status == "empty") {
@@ -310,6 +310,11 @@ while(keep_working) {
     # Si estamos en cluster, tenemos un condition_id real de la DB
     condition_id <- if("condition_id" %in% names(cond)) cond$condition_id else NA
     
+    # Sanitizar condition_id para evitar error "Parameter does not have length 1" en RSQLite
+    if (!is.na(condition_id) && length(condition_id) > 0) {
+      condition_id <- as.integer(unlist(condition_id))[1]
+    }
+
     t0 <- calculate_T_event(Nt, T_event_prop)
     
     cat(sprintf("\n>>> Processing Condition ID %s: N=%d, Nt=%d, M=%.2f\n", 

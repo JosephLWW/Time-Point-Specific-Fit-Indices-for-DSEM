@@ -156,8 +156,14 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
 
 mark_condition_completed <- function(db_path, condition_id, error_msg = NULL) {
   require(RSQLite)
-  
+
+  # FIX: Convert NULL to NA to ensure length 1 for SQL parameter binding
+  if (is.null(error_msg)) {
+    error_msg <- NA_character_
+  }
+
   max_retries <- 10
+  base_sleep <- 0.5
   
   for (attempt in 1:max_retries) {
     tryCatch({
