@@ -27,6 +27,7 @@ for (pkg in required_pkgs) {
 }
 
 rstan_options(auto_write = TRUE)
+rstan_options(threads_per_chain = 1)
 
 # Cluster
 options(mc.cores = parallelly::availableCores())
@@ -273,7 +274,7 @@ while(keep_working) {
     bundle <- get_bundle(
       db_path = config$db_path,
       job_id = rslurm_id,
-      batch_size = 3,
+      batch_size = 1,
       n_jobs = 100
     )
     

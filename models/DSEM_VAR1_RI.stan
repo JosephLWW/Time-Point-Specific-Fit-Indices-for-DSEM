@@ -20,23 +20,34 @@ parameters {
   corr_matrix[2] phi2;
   //real  eta[N,Nt,2];
   matrix[N,2] eta[Nt];
-  matrix[N,2] u0;
   
+  // CAMBIO: Parametrizacion no centrada (z-scores)
+  // Antes: matrix[N,2] u0;
+  matrix[N,2] u0_z; 
 }
 
 transformed parameters{
   matrix[2,2] sigmaeta1;
   matrix[2,2] sigmaeta2;
+  
+  // CAMBIO: Recuperamos u0 real aqui
+  matrix[N,2] u0;
+  matrix[2,2] L_sigmaeta2;
+
   sigmaeta1 = quad_form_diag(phi1,sigmazeta1);
   sigmaeta2 = quad_form_diag(phi2,sigmazeta2);
-  
-  
+
+
+  // Construccion no centrada
+  L_sigmaeta2 = cholesky_decompose(sigmaeta2);
+  // u0 = z * L' (transforma normales estandar a multivariadas correlacionadas)
+  u0 = u0_z * L_sigmaeta2';
 }
 
 model {
   matrix[N,2] mueta[Nt];
   matrix[N,6] muy[Nt];
-  vector[2]   mu0= rep_vector(0, 2);  
+  // vector de mu0 no se usa explicitamente
   vector[2]   lu= rep_vector(1, 2);  
   
   // mean structure for eta, simple AR(1), no crossloadings
@@ -64,9 +75,11 @@ model {
     
   }
 
+  // Prior simple on scores z
+  to_vector(u0_z) ~ std_normal();
 
   for (i in 1:N) {
-    u0[i,1:2] ~ multi_normal(mu0,sigmaeta2);    
+    // sampling of u0 up
     
     for(j in 1:Nt){
       for(k in 1:6){y[j,i,k] ~ normal(muy[j,i,k], sigmaeps[k]);}

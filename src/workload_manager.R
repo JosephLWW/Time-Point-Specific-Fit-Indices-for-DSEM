@@ -133,8 +133,11 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
         retry_count <<- retry_count + 1
         
         if (retry_count < max_retries) {
-          wait_time <- 0.5 * (2 ^ (retry_count - 1))
-          cat(sprintf("DB lock (retry %d/%d, waiting %.1fs): %s\n",
+          base_wait <- 0.5 * (2 ^ (retry_count - 1))
+          vals_jitter <- runif(1, 0.1, 0.5) 
+          wait_time <- base_wait + vals_jitter
+          
+          cat(sprintf("DB lock (retry %d/%d, waiting %.2fs): %s\n",
                      retry_count, max_retries, wait_time, conditionMessage(e)))
           Sys.sleep(wait_time)
         } else {
@@ -187,7 +190,10 @@ mark_condition_completed <- function(db_path, condition_id, error_msg = NULL) {
       if (exists("db") && dbIsValid(db)) dbDisconnect(db)
       
       if (attempt < max_retries) {
-        wait_time <- 0.05 * (2 ^ (attempt - 1))  # Exponential backoff
+        base_wait <- 0.05 * (2 ^ (attempt - 1))
+        vals_jitter <- runif(1, 0.01, 0.1)
+        wait_time <- base_wait + vals_jitter
+        
         Sys.sleep(wait_time)
       } else {
         cat(sprintf("Failed to mark condition %d after %d retries: %s\n", 

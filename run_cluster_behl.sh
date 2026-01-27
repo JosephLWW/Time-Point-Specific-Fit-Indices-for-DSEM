@@ -6,7 +6,7 @@
 #SBATCH --time=72:00:00
 #SBATCH --array=1-100
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=8G
+#SBATCH --mem-per-cpu=4G
 #SBATCH --output=logs/sim_%A_%a.out
 #SBATCH --error=logs/sim_%A_%a.err
 
@@ -41,8 +41,8 @@ Rscript main.R
 EXIT_CODE=$?
 if [ $EXIT_CODE -eq 0 ]; then
     echo "SUCCESS"
-    rm "logs/sim_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.out"
-    rm "logs/sim_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.err"
+    # rm "logs/sim_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.out"
+    # rm "logs/sim_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.err"
 else
     echo "ERROR"
     exit 1
