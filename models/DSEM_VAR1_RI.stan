@@ -58,8 +58,11 @@ model {
   
     //t==rest
     for(j in 2:Nt){
-      mueta[j,i,1] = ka[1]+lu[1]*u0[i,1]+beta1[1,1]*(eta[j-1,i,1]-lu[1]*u0[i,1]-ka[1])+beta1[1,2]*(eta[j-1,i,2]-lu[2]*u0[i,2]-ka[2]);
-      mueta[j,i,2] = ka[2]+lu[2]*u0[i,2]+beta1[2,1]*(eta[j-1,i,1]-lu[1]*u0[i,1]-ka[1])+beta1[2,2]*(eta[j-1,i,2]-lu[2]*u0[i,2]-ka[2]);
+      // Vectorized
+      vector[2] prev_eta = to_vector(eta[j-1,i]) - lu .* to_vector(u0[i]) - ka;
+      vector[2] curr_mu = ka + lu .* to_vector(u0[i]) + beta1 * prev_eta;
+      mueta[j,i,1] = curr_mu[1];
+      mueta[j,i,2] = curr_mu[2];
     }
     
     for(j in 1:Nt){
@@ -77,30 +80,32 @@ model {
 
   // Prior simple on scores z
   to_vector(u0_z) ~ std_normal();
-
-  for (i in 1:N) {
-    // sampling of u0 up
-    
-    for(j in 1:Nt){
-      for(k in 1:6){y[j,i,k] ~ normal(muy[j,i,k], sigmaeps[k]);}
-
-      eta[j,i,1:2] ~ multi_normal(mueta[j,i,1:2],sigmaeta1);    
-    }
-    
-  }
-
-  //priors
-  //lu ~ normal(0,1);
   ty ~ normal(0,10);
   ly ~ normal(0,1);
   ka ~ normal(0,1);
-  for(k in 1:2){beta1[,k] ~ normal(0,1);}
+  to_vector(beta1) ~ normal(0,1); // Vectorized
   sigmaeps ~ cauchy(0,5);
   sigmazeta1 ~ cauchy(0,5);
   sigmazeta2 ~ cauchy(0,5);
   phi1 ~ lkj_corr(1);
   phi2 ~ lkj_corr(1);
+
+  // Likelihood (Vectorized)
+  // Latent Variable Eta
+  for(j in 1:Nt){
+    for (i in 1:N) {
+       eta[j,i] ~ multi_normal(mueta[j,i], sigmaeta1);
+    }
+  }
   
+  // Observed Var Y
+  for(j in 1:Nt){
+    for(k in 1:6){
+       // col(matrix, k) extrae la columna k como un vector de tamaño N.
+       // Esto procesa los N sujetos de golpe.
+       col(y[j], k) ~ normal(col(muy[j], k), sigmaeps[k]);
+    }
+  }
 
 }
 
