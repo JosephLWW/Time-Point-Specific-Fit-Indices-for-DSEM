@@ -189,7 +189,16 @@ DBI::dbExecute(con, "
     T_event_prop REAL,
     t0 INTEGER,
     id0 INTEGER,
+    -- DIAGNOSTICS --
+    min_n_eff REAL,       -- Peor Size de muestra efectivo
+    n_divergent INTEGER,  -- Total divergencias (suma cadenas)
+    exec_time_sec REAL,   -- Tiempo total CPU (warmup+sample)
     conv_max_rhat REAL,
+    -- PARAMETER RECOVERY --
+    est_ar1 REAL,      -- ar0 should be close to 0.3 ar(1)
+    est_ar2 REAL,      -- same, autoregressive parameter t and t-1
+    est_ri_var1 REAL,  -- Varianza estimada del Random Intercept 1
+    est_ri_var2 REAL,  -- Varianza estimada del Random Intercept 2
     BRMSEA REAL,
     BGamma REAL,
     BadjGamma REAL,
@@ -322,135 +331,181 @@ while(keep_working) {
                 if(is.na(condition_id)) "?" else condition_id, N, Nt, M))
     
     # Inner loop: replications for this condition
-    tryCatch({
       for (rep in 1:R) {
-        current_seed <- calculate_seed(cond, seed_base, rep)
-        set.seed(current_seed)
-      
-        cat("Starting Replication", rep, "/", R, "...\n")
-        
-        # Generate data
-        ly1 <- matrix(0, 6, 2)
-        ly1[4, 1] <- M
-        
-        dat1 <- gendata02(N, Nt, phi0, mu0, ar0, ly0, ly1, td, t0 = t0)
-        y <- dat1[["y"]]
-        y.2 <- dat1[["y0"]]
-        
-        data.stan1 <- list(N = N, Nt = Nt, y = y)
-        
-        # Parámetros de control para mejorar convergencia
-        stan_control_list <- list(adapt_delta = 0.95, max_treedepth = 12)
-        
-        # Fit models
-        fit1 <- sampling(sm1, data = data.stan1,
-                        iter = iter_n,
-                        chains = chains_n,
-                        warmup = warmup_n,
-                        cores = cores_n,
-                        refresh = 0,
-                        control = stan_control_list,
-                        pars = c("ly","ty","sigmaeps","ka","beta1","sigmaeta1","sigmaeta2"),
-                        include = TRUE)
-        
-        fit1.null <- sampling(sm1.null, data = data.stan1,
-                              iter = iter_n,
-                              chains = chains_n,
-                              warmup = warmup_n,
-                              cores = cores_n,
-                              refresh = 0,
-                              control = stan_control_list,
-                              pars = c("ty","sigmaeps"),
-                              include = TRUE)
-        
-        # Extract convergence
-        fit_summary <- summary(fit1)
-        param_names <- rownames(fit_summary$summary)
-        beta_indices <- c()
-        for (t1 in 1:length(params2)) {
-          beta_indices <- c(beta_indices, grep(params2[t1], param_names))
-        }
-        
-        if(length(beta_indices) > 0) {
-          conv <- max(fit_summary$summary[beta_indices, "Rhat"], na.rm = TRUE)
-        } else {
-          conv <- NA
-        }
-        
-        # Compute fit indices
-        modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, 
-                          fit1.null = fit1.null, calc_overall = overall_fits)
+        # Error handling individual replication
+        tryCatch({
+            current_seed <- calculate_seed(cond, seed_base, rep)
+            set.seed(current_seed)
+          
+            cat("Starting Replication", rep, "/", R, "...\n")
+            
+            # Generate data
+            ly1 <- matrix(0, 6, 2)
+            ly1[4, 1] <- M
+            
+            dat1 <- gendata02(N, Nt, phi0, mu0, ar0, ly0, ly1, td, t0 = t0)
+            y <- dat1[["y"]]
+            y.2 <- dat1[["y0"]]
+            
+            data.stan1 <- list(N = N, Nt = Nt, y = y)
+            
+            # Parámetros de control para mejorar convergencia
+            stan_control_list <- list(adapt_delta = 0.95, max_treedepth = 12)
+            
+            # Fit models
+            fit1 <- sampling(sm1, data = data.stan1,
+                            iter = iter_n,
+                            chains = chains_n,
+                            warmup = warmup_n,
+                            cores = cores_n,
+                            refresh = 0,
+                            control = stan_control_list,
+                            pars = c("ly","ty","sigmaeps","ka","beta1","sigmaeta1","sigmaeta2"),
+                            include = TRUE)
+            
+            fit1.null <- sampling(sm1.null, data = data.stan1,
+                                  iter = iter_n,
+                                  chains = chains_n,
+                                  warmup = warmup_n,
+                                  cores = cores_n,
+                                  refresh = 0,
+                                  control = stan_control_list,
+                                  pars = c("ty","sigmaeps"),
+                                  include = TRUE)
+            
+            # Extract convergence
+            fit_summary <- summary(fit1)
 
-        # Identified?
-        val_id0 <- as.integer(modelfit$id0)
-        
-        # Prepare results for DB
-        idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
-        
-        # Recogemos valores con seguridad
-        raw_overall <- modelfit$overall
-        if(is.null(names(raw_overall))) names(raw_overall) <- idx_names
-        
-        overall_row <- data.frame(
-          run_id = as.character(run_id),
-          job_id = as.integer(job_id),
-          array_id = as.integer(rslurm_id),
-          rep = as.integer(rep),
-          N = as.integer(N),
-          Nt = as.integer(Nt),
-          M = as.numeric(M),
-          T_event_prop = as.numeric(T_event_prop),
-          t0 = as.integer(t0),
-          id0 = as.integer(val_id0),
-          conv_max_rhat = clean_val(conv),
-          BRMSEA = clean_val(raw_overall["BRMSEA"]),
-          BGamma = clean_val(raw_overall["BGamma"]),
-          BadjGamma = clean_val(raw_overall["BadjGamma"]),
-          BMc = clean_val(raw_overall["BMc"]),
-          BCFI = clean_val(raw_overall["BCFI"]),
-          BTLI = clean_val(raw_overall["BTLI"]),
-          created_at = as.character(format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
-          stringsAsFactors = FALSE
-        )
-        
-        # Time-point specific
-        tp_mat <- modelfit$timepoint
-        
-        if (is.list(tp_mat)) {
-            tp_mat <- do.call(cbind, lapply(seq_len(ncol(tp_mat)), function(i) unlist(tp_mat[,i])))
-        }
-        
-        tp_df <- as.data.frame(tp_mat, stringsAsFactors = FALSE)
-        colnames(tp_df) <- idx_names
-        
-        for(col in names(tp_df)) {
-            if(is.list(tp_df[[col]])) {
-                tp_df[[col]] <- unlist(tp_df[[col]])
+            # --- EXTRAER DIAGNÓSTICOS (NUEVO) ---
+            # 1. Divergentes: Suma de divergencias en todas las cadenas (post-warmup)
+            sampler_params <- get_sampler_params(fit1, inc_warmup = FALSE)
+            n_div_val <- sum(sapply(sampler_params, function(x) sum(x[, "divergent__"])))
+            
+            # 2. Tiempo ejecución: Suma de warmup y sampling de todas las cadenas (CPU time total)
+            time_mat <- get_elapsed_time(fit1)
+            exec_time_val <- sum(time_mat)
+            
+            # 3. Min n_eff: El peor valor de n_eff de todo el modelo (detecta bloqueos locales)
+            # Usamos la columna "n_eff" del summary que ya calculaste
+            min_n_eff_val <- min(fit_summary$summary[, "n_eff"], na.rm = TRUE)
+            # ------------------------------------
+
+            # --- EXTRAER PARÁMETROS ---
+            # Extraemos la media posterior (column "mean") de la summary de Stan
+            
+            # 1. Autoregresivos (Diagonal de beta1)
+            # beta1[1,1] y beta1[2,2]
+            est_ar1_val <- fit_summary$summary["beta1[1,1]", "mean"]
+            est_ar2_val <- fit_summary$summary["beta1[2,2]", "mean"]
+            
+            # 2. Varianzas de Random Intercepts (Diagonal de sigmaeta2)
+            # sigmaeta2 es la matriz de covarianza de los RI
+            est_ri_var1_val <- fit_summary$summary["sigmaeta2[1,1]", "mean"]
+            est_ri_var2_val <- fit_summary$summary["sigmaeta2[2,2]", "mean"]
+            # ----------------------------------------
+
+            param_names <- rownames(fit_summary$summary)
+            beta_indices <- c()
+            for (t1 in 1:length(params2)) {
+              beta_indices <- c(beta_indices, grep(params2[t1], param_names))
             }
-            tp_df[[col]] <- as.numeric(tp_df[[col]])
-        }
-        
-        tp_df$time <- seq_len(Nt)
-        tp_df$run_id <- as.character(run_id)
-        tp_df$job_id <- as.integer(job_id)
-        tp_df$array_id <- as.integer(rslurm_id)
-        tp_df$rep <- as.integer(rep)
-        tp_df$N <- as.integer(N)
-        tp_df$Nt <- as.integer(Nt)
-        tp_df$M <- as.numeric(M)
-        tp_df$T_event_prop <- as.numeric(T_event_prop)
-        tp_df$t0 <- as.integer(t0)
-        tp_df$id0 <- as.integer(val_id0)
-        tp_df$conv_max_rhat <- clean_val(conv)
-        
-        tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","Nt","M","T_event_prop","t0","id0","conv_max_rhat", idx_names)]
-        
-        DBI::dbWithTransaction(con, {
-          db_append_retry(con, "fit_overall", overall_row)
-          db_append_retry(con, "fit_timepoint", tp_df)
+            
+            if(length(beta_indices) > 0) {
+              conv <- max(fit_summary$summary[beta_indices, "Rhat"], na.rm = TRUE)
+            } else {
+              conv <- NA
+            }
+            
+            # Compute fit indices
+            modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, 
+                              fit1.null = fit1.null, calc_overall = overall_fits)
+
+            # Identified?
+            val_id0 <- as.integer(modelfit$id0)
+            
+            # Prepare results for DB
+            idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
+            
+            # Recogemos valores con seguridad
+            raw_overall <- modelfit$overall
+            if(is.null(names(raw_overall))) names(raw_overall) <- idx_names
+            
+            overall_row <- data.frame(
+              run_id = as.character(run_id),
+              job_id = as.integer(job_id),
+              array_id = as.integer(rslurm_id),
+              rep = as.integer(rep),
+              N = as.integer(N),
+              Nt = as.integer(Nt),
+              M = as.numeric(M),
+              T_event_prop = as.numeric(T_event_prop),
+              t0 = as.integer(t0),
+              id0 = as.integer(val_id0),
+              conv_max_rhat = clean_val(conv),
+
+              # --- AÑADIR AL DATAFRAME ---
+              min_n_eff = clean_val(min_n_eff_val),
+              n_divergent = clean_val(n_div_val),
+              exec_time_sec = clean_val(exec_time_val),
+              est_ar1 = clean_val(est_ar1_val),
+              est_ar2 = clean_val(est_ar2_val),
+              est_ri_var1 = clean_val(est_ri_var1_val),
+              est_ri_var2 = clean_val(est_ri_var2_val),
+              # ----------------------------------
+
+              BRMSEA = clean_val(raw_overall["BRMSEA"]),
+              BGamma = clean_val(raw_overall["BGamma"]),
+              BadjGamma = clean_val(raw_overall["BadjGamma"]),
+              BMc = clean_val(raw_overall["BMc"]),
+              BCFI = clean_val(raw_overall["BCFI"]),
+              BTLI = clean_val(raw_overall["BTLI"]),
+              created_at = as.character(format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+              stringsAsFactors = FALSE
+            )
+            
+            # Time-point specific
+            tp_mat <- modelfit$timepoint
+            
+            if (is.list(tp_mat)) {
+                tp_mat <- do.call(cbind, lapply(seq_len(ncol(tp_mat)), function(i) unlist(tp_mat[,i])))
+            }
+            
+            tp_df <- as.data.frame(tp_mat, stringsAsFactors = FALSE)
+            colnames(tp_df) <- idx_names
+            
+            for(col in names(tp_df)) {
+                if(is.list(tp_df[[col]])) {
+                    tp_df[[col]] <- unlist(tp_df[[col]])
+                }
+                tp_df[[col]] <- as.numeric(tp_df[[col]])
+            }
+            
+            tp_df$time <- seq_len(Nt)
+            tp_df$run_id <- as.character(run_id)
+            tp_df$job_id <- as.integer(job_id)
+            tp_df$array_id <- as.integer(rslurm_id)
+            tp_df$rep <- as.integer(rep)
+            tp_df$N <- as.integer(N)
+            tp_df$Nt <- as.integer(Nt)
+            tp_df$M <- as.numeric(M)
+            tp_df$T_event_prop <- as.numeric(T_event_prop)
+            tp_df$t0 <- as.integer(t0)
+            tp_df$id0 <- as.integer(val_id0)
+            tp_df$conv_max_rhat <- clean_val(conv)
+            
+            tp_df <- tp_df[, c("run_id","job_id","array_id","rep","time","N","Nt","M","T_event_prop","t0","id0","conv_max_rhat", idx_names)]
+            
+            DBI::dbWithTransaction(con, {
+              db_append_retry(con, "fit_overall", overall_row)
+              db_append_retry(con, "fit_timepoint", tp_df)
+            })
+            
+            cat("Replication", rep, "/", R, "completed successfully.\n")
+
+        }, error = function(e) {
+            # MANEJO DE ERROR INDIVIDUAL (SLOGUEAR Y CONTINUAR)
+            cat(sprintf("!!! ERROR in Rep %d (skipping): %s\n", rep, e$message))
         })
-        
-        cat("Replication", rep, "/", R, "completed successfully.\n")
       }
       
       # If cluster: mark task as done
@@ -459,12 +514,13 @@ while(keep_working) {
         cat(sprintf("Condition %d marked as completed in Task DB\n", condition_id))
       }
 
-    }, error = function(e) {
-      cat(sprintf("Error in condition %s: %s\n", condition_id, e$message))
-      if (is_cluster && !is.na(condition_id)) {
-        mark_condition_completed(config$db_path, condition_id, error_msg = e$message)
-      }
-    })
+    # ELIMINAMOS EL ERROR HANDLING EXTERNO PORQUE AHORA ES INTERNO
+    # }, error = function(e) {
+    #   cat(sprintf("Error in condition %s: %s\n", condition_id, e$message))
+    #   if (is_cluster && !is.na(condition_id)) {
+    #     mark_condition_completed(config$db_path, condition_id, error_msg = e$message)
+    #   }
+    # })
     
   } # Fin loop condiciones
   
