@@ -284,7 +284,7 @@ while(keep_working) {
       db_path = config$db_path,
       job_id = rslurm_id,
       batch_size = 1,
-      n_jobs = 100
+      n_jobs = 150
     )
     
     if (bundle$status == "empty") {

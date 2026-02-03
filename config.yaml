@@ -7,7 +7,7 @@ overall_fits: False
   
 settings:
   "N": [30, 60, 90, 120, 150, 300]
-  N_t: [5, 10, 15, 25] # 50, 75 excluded to limit runtime
+  N_t: [5, 10, 15, 25, 50] # 75 excluded to limit runtime
   M: [0, 0.3, 0.6]  # Cross-loading magnitudes
   T_event: [0.25, 0.5, 0.75]
   R: 200
@@ -18,8 +18,8 @@ settings:
 
 mcmc:
   chains: 4
-  iter: 2000
-  warmup: 1000
+  iter: 1000
+  warmup: 500
   cores: 4
 
 #########################################################################################################

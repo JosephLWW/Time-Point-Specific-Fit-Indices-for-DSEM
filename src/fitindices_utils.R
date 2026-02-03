@@ -113,11 +113,32 @@ getmax <- function(x){
 ################################################################
 getfit <- function(fit1, y, y.2, nvar, Nt, cfi=T, fit1.null=NA, calc_overall=FALSE){
   #nvar <- 6
-  samps <- getmcmc(fit1,jags=F) # function extracts samples from jags or stan
+  samps_full <- getmcmc(fit1,jags=F) # function extracts samples from jags or stan
+  
+  # --- OPTIMIZATION START: Thinning ---
+  # Si hay muchas muestras, nos quedamos con un subconjunto representativo (ej. 300)
+  # para el cálculo de índices de ajuste, que es computacionalmente costoso.
+  n_total <- dim(samps_full)[1]
+  idx_use <- 1:n_total
+  
+  MAX_SAMPLES_FIT <- 1000 
+  if (n_total > MAX_SAMPLES_FIT) {
+    # Selección equidistante para mantener representatividad de toda la cadena
+    idx_use <- round(seq(1, n_total, length.out = MAX_SAMPLES_FIT))
+    samps <- samps_full[idx_use, ]
+  } else {
+    samps <- samps_full
+  }
+
   nsamps <- dim(samps)[1]
   
   if(cfi==T){
-    samps.null <- getmcmc(fit1.null,jags=F) # function extracts samples from jags or stan
+    samps.null_full <- getmcmc(fit1.null,jags=F) # function extracts samples from jags or stan
+    if (n_total > MAX_SAMPLES_FIT) {
+        samps.null <- samps.null_full[idx_use, ]
+    } else {
+        samps.null <- samps.null_full
+    }
   }
   
   # identification constraint
