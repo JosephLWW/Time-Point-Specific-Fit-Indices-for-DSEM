@@ -94,7 +94,7 @@ td <- diag(6)*(1-ly00^2) # cond. var(y) -> res var
 
 rt1 <- stanc("models/DSEM_VAR1_RI.stan")
 sm1 <- stan_model(stanc_ret = rt1, verbose=FALSE)
-params2 <- c("ly","sigmaeps","sigmaeta1","sigmaeta2","ty","ka","beta1")
+params2 <- c("ly","sigmaeps","sigmaeta1","sigmaeta2","ty","ka","beta1","phi1")
 
 rt1.null <- stanc("models/DSEM_NULL.stan")
 sm1.null <- stan_model(stanc_ret = rt1.null, verbose=FALSE)
@@ -368,7 +368,7 @@ while(keep_working) {
                             cores = cores_n,
                             refresh = 0,
                             control = stan_control_list,
-                            pars = c("ly","ty","sigmaeps","ka","beta1","sigmaeta1","sigmaeta2"),
+                            pars = c("ly","ty","sigmaeps","ka","beta1","sigmaeta1","sigmaeta2","phi1"),
                             include = TRUE)
             
             fit1.null <- sampling(sm1.null, data = data.stan1,
