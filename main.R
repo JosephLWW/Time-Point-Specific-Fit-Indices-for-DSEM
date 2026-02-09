@@ -199,6 +199,14 @@ DBI::dbExecute(con, "
     est_ar2 REAL,      -- same, autoregressive parameter t and t-1
     est_ri_var1 REAL,  -- Varianza estimada del Random Intercept 1
     est_ri_var2 REAL,  -- Varianza estimada del Random Intercept 2
+    
+    -- PARAMETERS FOR BIAS CHECK: Factor loadings and correlation --
+    est_ly1 REAL,      -- Loading Item 2 (Factor 1)
+    est_ly2 REAL,      -- Loading Item 3 (Factor 1)
+    est_ly3 REAL,      -- Loading Item 5 (Factor 2)
+    est_ly4 REAL,      -- Loading Item 6 (Factor 2)
+    est_corr_factor REAL, -- Correlacion residual entre factores (phi1[1,2])
+
     BRMSEA REAL,
     BGamma REAL,
     BadjGamma REAL,
@@ -402,6 +410,16 @@ while(keep_working) {
             # sigmaeta2 es la matriz de covarianza de los RI
             est_ri_var1_val <- fit_summary$summary["sigmaeta2[1,1]", "mean"]
             est_ri_var2_val <- fit_summary$summary["sigmaeta2[2,2]", "mean"]
+
+            # 3. Cargas Factoriales (Para check de Bias de Medida)
+            # ly[1-2] -> Factor 1, ly[3-4] -> Factor 2
+            est_ly1_val <- fit_summary$summary["ly[1]", "mean"]
+            est_ly2_val <- fit_summary$summary["ly[2]", "mean"]
+            est_ly3_val <- fit_summary$summary["ly[3]", "mean"]
+            est_ly4_val <- fit_summary$summary["ly[4]", "mean"]
+            
+            # 4. Correlacion de factores (Residual, phi1)
+            est_phi_val <- fit_summary$summary["phi1[1,2]", "mean"]
             # ----------------------------------------
 
             param_names <- rownames(fit_summary$summary)
@@ -451,6 +469,13 @@ while(keep_working) {
               est_ar2 = clean_val(est_ar2_val),
               est_ri_var1 = clean_val(est_ri_var1_val),
               est_ri_var2 = clean_val(est_ri_var2_val),
+              
+              # Add Loadings and correlation for bias check
+              est_ly1 = clean_val(est_ly1_val),
+              est_ly2 = clean_val(est_ly2_val),
+              est_ly3 = clean_val(est_ly3_val),
+              est_ly4 = clean_val(est_ly4_val),
+              est_corr_factor = clean_val(est_phi_val),
               # ----------------------------------
 
               BRMSEA = clean_val(raw_overall["BRMSEA"]),

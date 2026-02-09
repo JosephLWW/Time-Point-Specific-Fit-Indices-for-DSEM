@@ -84,9 +84,9 @@ model {
   ly ~ normal(0,1);
   ka ~ normal(0,1);
   to_vector(beta1) ~ normal(0,1); // Vectorized
-  sigmaeps ~ cauchy(0,5);
-  sigmazeta1 ~ cauchy(0,5);
-  sigmazeta2 ~ cauchy(0,5);
+  sigmaeps ~ normal(0, 1); // MORE INFORMATIVE PRIORS ADDED
+  sigmazeta1 ~ normal(0, 1); // MORE INFORMATIVE PRIORS ADDED
+  sigmazeta2 ~ normal(0, 1); // MORE INFORMATIVE PRIORS ADDED
   phi1 ~ lkj_corr(1);
   phi2 ~ lkj_corr(1);
 
