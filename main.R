@@ -50,7 +50,11 @@ N.all <- unlist(config$settings$N)
 Nt.all <- unlist(config$settings$N_t)
 M_values <- unlist(config$settings$M)
 T_event_proportions <- unlist(config$settings$T_event)
-R <- config$settings$R  # replications per condition
+R <- config$settings$R  # Total replications per condition
+
+# --- CHUNKING CONFIGURATION ---
+# Default to 5 reps per chunk if not specified in config
+reps_per_chunk <- if(!is.null(config$mcmc$reps_per_chunk)) config$mcmc$reps_per_chunk else 5
 
 # MCMC
 iter_n <- if(!is.null(config$mcmc$iter)) config$mcmc$iter else 2000
@@ -110,10 +114,11 @@ calculate_T_event <- function(N_t, proportion) {
 }
 
 ##########################
-# Generate conditions grid
+# Generate conditions grid (WITH CHUNKING)
 ##########################
 
-conditions_grid <- expand.grid(
+# 1. Base grid (Conditions only)
+base_grid <- expand.grid(
   N = N.all,
   Nt = Nt.all,
   M = M_values,
@@ -122,11 +127,28 @@ conditions_grid <- expand.grid(
 )
 
 # Avoid bug with list and SQLite
-for (col in names(conditions_grid)) {
-  if (is.list(conditions_grid[[col]])) {
-    conditions_grid[[col]] <- unlist(conditions_grid[[col]])
+for (col in names(base_grid)) {
+  if (is.list(base_grid[[col]])) {
+    base_grid[[col]] <- unlist(base_grid[[col]])
   }
 }
+
+# 2. Generate Chunk Map
+num_chunks <- ceiling(R / reps_per_chunk)
+chunks_df <- data.frame(
+  chunk_id = 1:num_chunks,
+  start_rep = seq(1, R, by = reps_per_chunk)
+)
+chunks_df$end_rep <- pmin(chunks_df$start_rep + reps_per_chunk - 1, R)
+
+# 3. Expand Grid (Cartesian Join: Conditions x Chunks)
+# Each condition is now split into multiple rows
+conditions_grid <- merge(base_grid, chunks_df, by = NULL) 
+
+cat(sprintf("Total Conditions: %d\n", nrow(base_grid)))
+cat(sprintf("Replications per Chunk: %d\n", reps_per_chunk))
+cat(sprintf("Total Atomic Tasks: %d\n", nrow(conditions_grid)))
+
 
 ##########################
 # Cluster Detection & Workload Manager
@@ -166,8 +188,6 @@ if (!dir.exists(run_dir)) {
 db_file <- file.path(run_dir, "fit_indices.sqlite")
 config$db_path <- db_file
 
-# Pequeña pausa aleatoria antes de conectar para evitar "thundering herd"
-# (que 100 tareas intenten crear el archivo .sqlite en el mismo microsegundo exacto)
 Sys.sleep(runif(1, min=0.01, max=0.2))
 
 con <- DBI::dbConnect(RSQLite::SQLite(), db_file)
@@ -183,6 +203,7 @@ DBI::dbExecute(con, "
     job_id INTEGER,
     array_id INTEGER,
     rep INTEGER,
+    chunk_id INTEGER, -- Added for traceability
     N INTEGER,
     Nt INTEGER,
     M REAL,
@@ -190,22 +211,22 @@ DBI::dbExecute(con, "
     t0 INTEGER,
     id0 INTEGER,
     -- DIAGNOSTICS --
-    min_n_eff REAL,       -- Peor Size de muestra efectivo
-    n_divergent INTEGER,  -- Total divergencias (suma cadenas)
-    exec_time_sec REAL,   -- Tiempo total CPU (warmup+sample)
+    min_n_eff REAL,       
+    n_divergent INTEGER,  
+    exec_time_sec REAL,   
     conv_max_rhat REAL,
     -- PARAMETER RECOVERY --
-    est_ar1 REAL,      -- ar0 should be close to 0.3 ar(1)
-    est_ar2 REAL,      -- same, autoregressive parameter t and t-1
-    est_ri_var1 REAL,  -- Varianza estimada del Random Intercept 1
-    est_ri_var2 REAL,  -- Varianza estimada del Random Intercept 2
+    est_ar1 REAL,      
+    est_ar2 REAL,      
+    est_ri_var1 REAL,  
+    est_ri_var2 REAL,  
     
     -- PARAMETERS FOR BIAS CHECK: Factor loadings and correlation --
-    est_ly1 REAL,      -- Loading Item 2 (Factor 1)
-    est_ly2 REAL,      -- Loading Item 3 (Factor 1)
-    est_ly3 REAL,      -- Loading Item 5 (Factor 2)
-    est_ly4 REAL,      -- Loading Item 6 (Factor 2)
-    est_corr_factor REAL, -- Correlacion residual entre factores (phi1[1,2])
+    est_ly1 REAL,      
+    est_ly2 REAL,      
+    est_ly3 REAL,      
+    est_ly4 REAL,      
+    est_corr_factor REAL, 
 
     BRMSEA REAL,
     BGamma REAL,
@@ -252,7 +273,7 @@ if (is_cluster) {
 }
 
 ############################
-# Helper functions (DEFINIR UNA SOLA VEZ ANTES DEL WHILE)
+# Helper functions
 ############################
 
 calculate_seed <- function(cond_row, seed_base, rep) {
@@ -268,6 +289,7 @@ calculate_seed <- function(cond_row, seed_base, rep) {
     (round(T_prop * 100) * 10000000)
   ) %% 100000
   
+  # Crucial: rep identifies unique stream. Rep must be global index.
   val <- (seed_base + condition_hash * 100000 + rep)
   return(as.integer(val %% 2147483647))
 }
@@ -285,27 +307,27 @@ keep_working <- TRUE
 while(keep_working) {
 
   ############################
-  # Get bundle of conditions (UNA SOLA VEZ)
+  # Get bundle of conditions
   ############################
   if (is_cluster) {
     bundle <- get_bundle(
       db_path = config$db_path,
       job_id = rslurm_id,
-      batch_size = 1,
+      batch_size = 1, # Fetch 1 chunk at a time (Atomic) to prevent timeout
       n_jobs = 150
     )
     
     if (bundle$status == "empty") {
-      cat("✓ No pending tasks. Worker finished.\n")
+      cat("✓ No pending tasks (chunks). Worker finished.\n")
       keep_working <- FALSE
       break
     }
     
     conditions_to_run <- bundle$conditions
-    cat(sprintf(">>> Starting bundle: %s (%d conditions)\n", bundle$bundle_id, nrow(conditions_to_run)))
+    cat(sprintf(">>> Starting bundle: %s (%d chunks)\n", bundle$bundle_id, nrow(conditions_to_run)))
     
   } else {
-    # LOCAL MODE: Solo una vuelta con la condición indicada
+    # LOCAL MODE: Run 1 chunk for testing
     if (rslurm_id > nrow(conditions_grid)) stop("rslurm_id out of bounds")
     conditions_to_run <- conditions_grid[rslurm_id, , drop = FALSE]
     keep_working <- FALSE
@@ -319,33 +341,38 @@ while(keep_working) {
     
     cond <- conditions_to_run[cond_idx, ]
     
-    # Extraer parámetros de la fila actual
+    # Extract params
     N <- as.numeric(cond$N)
     Nt <- as.numeric(cond$Nt)
     M <- as.numeric(cond$M)
     T_event_prop <- as.numeric(cond$T_event_prop)
     
-    # Si estamos en cluster, tenemos un condition_id real de la DB
-    condition_id <- if("condition_id" %in% names(cond)) cond$condition_id else NA
+    # --- GLOBAL REP RANGE ---
+    start_rep <- as.integer(cond$start_rep)
+    end_rep   <- as.integer(cond$end_rep)
+    chunk_id  <- as.integer(cond$chunk_id)
     
-    # Sanitizar condition_id para evitar error "Parameter does not have length 1" en RSQLite
+    # Task ID from DB
+    condition_id <- if("condition_id" %in% names(cond)) cond$condition_id else NA
     if (!is.na(condition_id) && length(condition_id) > 0) {
       condition_id <- as.integer(unlist(condition_id))[1]
     }
 
     t0 <- calculate_T_event(Nt, T_event_prop)
     
-    cat(sprintf("\n>>> Processing Condition ID %s: N=%d, Nt=%d, M=%.2f\n", 
-                if(is.na(condition_id)) "?" else condition_id, N, Nt, M))
+    cat(sprintf("\n>>> Processing Task (Chunk) %d: N=%d, Nt=%d, Reps %d-%d\n", 
+                condition_id, N, Nt, start_rep, end_rep))
     
-    # Inner loop: replications for this condition
-      for (rep in 1:R) {
-        # Error handling individual replication
+    # Inner loop: iterate over the SPECIFIC RANGE for this chunk
+    # This replaces the old 1:R loop
+    for (rep in start_rep:end_rep) {
+        
         tryCatch({
+            # Ensure we use GLOBAL rep for seed
             current_seed <- calculate_seed(cond, seed_base, rep)
             set.seed(current_seed)
           
-            cat("Starting Replication", rep, "/", R, "...\n")
+            cat("  -> Rep", rep, "of global", R, "...\n")
             
             # Generate data
             ly1 <- matrix(0, 6, 2)
@@ -357,7 +384,6 @@ while(keep_working) {
             
             data.stan1 <- list(N = N, Nt = Nt, y = y)
             
-            # Parámetros de control para mejorar convergencia
             stan_control_list <- list(adapt_delta = 0.95, max_treedepth = 12)
             
             # Fit models
@@ -384,43 +410,23 @@ while(keep_working) {
             # Extract convergence
             fit_summary <- summary(fit1)
 
-            # --- EXTRAER DIAGNÓSTICOS (NUEVO) ---
-            # 1. Divergentes: Suma de divergencias en todas las cadenas (post-warmup)
+            # Diagnostics
             sampler_params <- get_sampler_params(fit1, inc_warmup = FALSE)
             n_div_val <- sum(sapply(sampler_params, function(x) sum(x[, "divergent__"])))
-            
-            # 2. Tiempo ejecución: Suma de warmup y sampling de todas las cadenas (CPU time total)
             time_mat <- get_elapsed_time(fit1)
             exec_time_val <- sum(time_mat)
-            
-            # 3. Min n_eff: El peor valor de n_eff de todo el modelo (detecta bloqueos locales)
-            # Usamos la columna "n_eff" del summary que ya calculaste
             min_n_eff_val <- min(fit_summary$summary[, "n_eff"], na.rm = TRUE)
-            # ------------------------------------
 
-            # --- EXTRAER PARÁMETROS ---
-            # Extraemos la media posterior (column "mean") de la summary de Stan
-            
-            # 1. Autoregresivos (Diagonal de beta1)
-            # beta1[1,1] y beta1[2,2]
+            # Extract params
             est_ar1_val <- fit_summary$summary["beta1[1,1]", "mean"]
             est_ar2_val <- fit_summary$summary["beta1[2,2]", "mean"]
-            
-            # 2. Varianzas de Random Intercepts (Diagonal de sigmaeta2)
-            # sigmaeta2 es la matriz de covarianza de los RI
             est_ri_var1_val <- fit_summary$summary["sigmaeta2[1,1]", "mean"]
             est_ri_var2_val <- fit_summary$summary["sigmaeta2[2,2]", "mean"]
-
-            # 3. Cargas Factoriales (Para check de Bias de Medida)
-            # ly[1-2] -> Factor 1, ly[3-4] -> Factor 2
             est_ly1_val <- fit_summary$summary["ly[1]", "mean"]
             est_ly2_val <- fit_summary$summary["ly[2]", "mean"]
             est_ly3_val <- fit_summary$summary["ly[3]", "mean"]
             est_ly4_val <- fit_summary$summary["ly[4]", "mean"]
-            
-            # 4. Correlacion de factores (Residual, phi1)
             est_phi_val <- fit_summary$summary["phi1[1,2]", "mean"]
-            # ----------------------------------------
 
             param_names <- rownames(fit_summary$summary)
             beta_indices <- c()
@@ -438,13 +444,9 @@ while(keep_working) {
             modelfit <- getfit(fit1, y, y.2, nvar = 6, Nt = Nt, cfi = TRUE, 
                               fit1.null = fit1.null, calc_overall = overall_fits)
 
-            # Identified?
             val_id0 <- as.integer(modelfit$id0)
-            
-            # Prepare results for DB
             idx_names <- c("BRMSEA","BGamma","BadjGamma","BMc","BCFI","BTLI")
             
-            # Recogemos valores con seguridad
             raw_overall <- modelfit$overall
             if(is.null(names(raw_overall))) names(raw_overall) <- idx_names
             
@@ -453,6 +455,7 @@ while(keep_working) {
               job_id = as.integer(job_id),
               array_id = as.integer(rslurm_id),
               rep = as.integer(rep),
+              chunk_id = as.integer(chunk_id),
               N = as.integer(N),
               Nt = as.integer(Nt),
               M = as.numeric(M),
@@ -460,8 +463,6 @@ while(keep_working) {
               t0 = as.integer(t0),
               id0 = as.integer(val_id0),
               conv_max_rhat = clean_val(conv),
-
-              # --- AÑADIR AL DATAFRAME ---
               min_n_eff = clean_val(min_n_eff_val),
               n_divergent = clean_val(n_div_val),
               exec_time_sec = clean_val(exec_time_val),
@@ -469,15 +470,11 @@ while(keep_working) {
               est_ar2 = clean_val(est_ar2_val),
               est_ri_var1 = clean_val(est_ri_var1_val),
               est_ri_var2 = clean_val(est_ri_var2_val),
-              
-              # Add Loadings and correlation for bias check
               est_ly1 = clean_val(est_ly1_val),
               est_ly2 = clean_val(est_ly2_val),
               est_ly3 = clean_val(est_ly3_val),
               est_ly4 = clean_val(est_ly4_val),
               est_corr_factor = clean_val(est_phi_val),
-              # ----------------------------------
-
               BRMSEA = clean_val(raw_overall["BRMSEA"]),
               BGamma = clean_val(raw_overall["BGamma"]),
               BadjGamma = clean_val(raw_overall["BadjGamma"]),
@@ -488,22 +485,13 @@ while(keep_working) {
               stringsAsFactors = FALSE
             )
             
-            # Time-point specific
             tp_mat <- modelfit$timepoint
-            
             if (is.list(tp_mat)) {
                 tp_mat <- do.call(cbind, lapply(seq_len(ncol(tp_mat)), function(i) unlist(tp_mat[,i])))
             }
-            
             tp_df <- as.data.frame(tp_mat, stringsAsFactors = FALSE)
             colnames(tp_df) <- idx_names
-            
-            for(col in names(tp_df)) {
-                if(is.list(tp_df[[col]])) {
-                    tp_df[[col]] <- unlist(tp_df[[col]])
-                }
-                tp_df[[col]] <- as.numeric(tp_df[[col]])
-            }
+            for(col in names(tp_df)) tp_df[[col]] <- as.numeric(unlist(tp_df[[col]]))
             
             tp_df$time <- seq_len(Nt)
             tp_df$run_id <- as.character(run_id)
@@ -525,33 +513,24 @@ while(keep_working) {
               db_append_retry(con, "fit_timepoint", tp_df)
             })
             
-            cat("Replication", rep, "/", R, "completed successfully.\n")
+            cat("  -> Rep", rep, "saved OK.\n")
 
         }, error = function(e) {
-            # MANEJO DE ERROR INDIVIDUAL (SLOGUEAR Y CONTINUAR)
             cat(sprintf("!!! ERROR in Rep %d (skipping): %s\n", rep, e$message))
         })
-      }
+      } # End Inner Loop
       
-      # If cluster: mark task as done
+      # Mark Chunk Completed
       if (is_cluster && !is.na(condition_id)) {
         mark_condition_completed(config$db_path, condition_id)
-        cat(sprintf("Condition %d marked as completed in Task DB\n", condition_id))
+        cat(sprintf("✓ Task/Chunk %d marked as completed.\n", condition_id))
       }
-
-    # ELIMINAMOS EL ERROR HANDLING EXTERNO PORQUE AHORA ES INTERNO
-    # }, error = function(e) {
-    #   cat(sprintf("Error in condition %s: %s\n", condition_id, e$message))
-    #   if (is_cluster && !is.na(condition_id)) {
-    #     mark_condition_completed(config$db_path, condition_id, error_msg = e$message)
-    #   }
-    # })
     
-  } # Fin loop condiciones
+  } # End Bundle Loop
   
   if(is_cluster) Sys.sleep(1)
   
-} # Fin while
+} # End While
 
 # Close DB connection
 DBI::dbDisconnect(con)

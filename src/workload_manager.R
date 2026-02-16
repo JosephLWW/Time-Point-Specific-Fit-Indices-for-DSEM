@@ -2,10 +2,7 @@
 # workload_manager.R
 # ============================================================================
 # Task Farming System for DSEM Simulation Study
-# Distributes 324 conditions × 250 replications across 50 SLURM array jobs
-# 
-# Role: Assign bundles (packages) of conditions to individual workers
-# Each worker gets a batch of conditions to execute, reducing DB contention
+# Distributes atomic chunks (e.g., 5 reps) across SLURM array jobs
 # ============================================================================
 
 # ============================================================================
@@ -19,11 +16,26 @@ init_tasks_db <- function(db_path, conditions_grid, batch_size = 3) {
   
   tryCatch({
     dbExecute(db, "PRAGMA journal_mode = WAL")
-    dbExecute(db, "PRAGMA busy_timeout = 60000")  # ← Aumentar a 60s
+    dbExecute(db, "PRAGMA busy_timeout = 60000")
+    
+    # --- SCHEMA CHECK ---
+    # Check if table exists and has the new 'chunk_id' column
+    table_exists <- dbGetQuery(db, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='tasks'")[1,1]
+    
+    if (table_exists > 0) {
+      cols <- dbListFields(db, "tasks")
+      if (!("chunk_id" %in% cols)) {
+        message("!!! DETECTED OLD SCHEMA. Dropping 'tasks' table to support Atomic Chunking !!!")
+        dbExecute(db, "DROP TABLE tasks")
+      }
+    }
     
     dbExecute(db, "
       CREATE TABLE IF NOT EXISTS tasks (
         condition_id INTEGER PRIMARY KEY,
+        chunk_id INTEGER,       -- Global Chunk ID
+        start_rep INTEGER,      -- First Global Rep Number (e.g. 6)
+        end_rep INTEGER,        -- Last Global Rep Number (e.g. 10)
         N INTEGER,
         Nt INTEGER,
         M REAL,
@@ -39,24 +51,25 @@ init_tasks_db <- function(db_path, conditions_grid, batch_size = 3) {
     n_existing <- dbGetQuery(db, "SELECT COUNT(*) FROM tasks")[1, 1]
     
     if (n_existing == 0) {
+      # Ensure conditions_grid has integer row names/IDs
       conditions_with_id <- cbind(
         condition_id = seq_len(nrow(conditions_grid)),
         conditions_grid
       )
       
       dbWriteTable(db, "tasks", conditions_with_id, append = TRUE, row.names = FALSE)
-      cat(sprintf("Created tasks table with %d conditions\n", nrow(conditions_grid)))
+      cat(sprintf("Created tasks table with %d atomic chunks\n", nrow(conditions_grid)))
     } else {
-      cat(sprintf("Tasks table already exists with %d conditions\n", n_existing))
+      cat(sprintf("Tasks table already exists with %d chunks\n", n_existing))
     }
     
     dbExecute(db, "CREATE INDEX IF NOT EXISTS idx_status ON tasks(status)")
     
   }, finally = {
-    dbDisconnect(db)  # ← SIEMPRE cierra
+    dbDisconnect(db)
   })
   
-  invisible(TRUE)  # ← Devuelve TRUE en lugar de conexión
+  invisible(TRUE)
 }
 
 
@@ -64,7 +77,7 @@ init_tasks_db <- function(db_path, conditions_grid, batch_size = 3) {
 # 2. WORKER FUNCTION: Request and Execute Bundle
 # ============================================================================
 
-get_bundle <- function(db_path, job_id, batch_size = 3,
+get_bundle <- function(db_path, job_id, batch_size = 1, # Default batch size lowered for fine granularity
                        n_jobs = 50, conditions_grid = NULL) {
   require(RSQLite)
   db <- dbConnect(RSQLite::SQLite(), db_path)
@@ -77,11 +90,11 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
     
     while (retry_count < max_retries) {
       tryCatch({
-        # ← CAMBIO CRÍTICO: BEGIN IMMEDIATE en lugar de dbBegin()
         dbExecute(db, "BEGIN IMMEDIATE")
         
+        # Select everything needed to define the chunk range
         pending <- dbGetQuery(db, "
-          SELECT condition_id, N, Nt, M, T_event_prop
+          SELECT condition_id, chunk_id, start_rep, end_rep, N, Nt, M, T_event_prop
           FROM tasks
           WHERE status = 0
           ORDER BY condition_id
@@ -101,7 +114,6 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
         
         condition_ids <- pending$condition_id
         
-        # ← CAMBIO: Usa los IDs específicos en lugar de subquery
         placeholders <- paste(rep("?", length(condition_ids)), collapse = ",")
         query <- sprintf("
           UPDATE tasks
@@ -114,10 +126,12 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
         dbExecute(db, query, params = c(list(job_id), as.list(condition_ids)))
         dbCommit(db)
         
-        bundle_id <- sprintf("job%03d_batch%04d", job_id, min(condition_ids))
+        bundle_id <- sprintf("job%03d_chunk%04d", job_id, min(condition_ids))
+        
+        # Reduced logging verbosity slightly
         cat(sprintf(
-          " Job %2d: Assigned %d conditions (IDs %d-%d) [bundle: %s]\n",
-          job_id, nrow(pending), min(condition_ids), max(condition_ids), bundle_id
+          " Job %2d: Acquired %d chunks (ID %d) [bundle: %s]\n",
+          job_id, nrow(pending), min(condition_ids), bundle_id
         ))
         
         return(list(
@@ -136,9 +150,6 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
           base_wait <- 0.5 * (2 ^ (retry_count - 1))
           vals_jitter <- runif(1, 0.1, 0.5) 
           wait_time <- base_wait + vals_jitter
-          
-          cat(sprintf("DB lock (retry %d/%d, waiting %.2fs): %s\n",
-                     retry_count, max_retries, wait_time, conditionMessage(e)))
           Sys.sleep(wait_time)
         } else {
           stop(sprintf("Failed to get bundle after %d retries: %s",
@@ -160,20 +171,18 @@ get_bundle <- function(db_path, job_id, batch_size = 3,
 mark_condition_completed <- function(db_path, condition_id, error_msg = NULL) {
   require(RSQLite)
 
-  # FIX: Convert NULL to NA to ensure length 1 for SQL parameter binding
   if (is.null(error_msg)) {
     error_msg <- NA_character_
   }
 
   max_retries <- 10
-  base_sleep <- 0.5
   
   for (attempt in 1:max_retries) {
     tryCatch({
       db <- dbConnect(RSQLite::SQLite(), db_path)
       dbExecute(db, "PRAGMA busy_timeout = 60000")
       
-      status_val <- 2  # Always mark as completed (even if error)
+      status_val <- 2 
       
       dbExecute(db, "
         UPDATE tasks 
@@ -191,14 +200,7 @@ mark_condition_completed <- function(db_path, condition_id, error_msg = NULL) {
       
       if (attempt < max_retries) {
         base_wait <- 0.05 * (2 ^ (attempt - 1))
-        vals_jitter <- runif(1, 0.01, 0.1)
-        wait_time <- base_wait + vals_jitter
-        
-        Sys.sleep(wait_time)
-      } else {
-        cat(sprintf("Failed to mark condition %d after %d retries: %s\n", 
-                    condition_id, max_retries, e$message))
-        return(invisible(FALSE))
+        Sys.sleep(base_wait + runif(1, 0.01, 0.1))
       }
     })
   }

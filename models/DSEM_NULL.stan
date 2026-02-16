@@ -20,7 +20,7 @@ model {
   //priors
   //lu ~ normal(0,1);
   for(k in 1:6){ty[k,] ~ normal(0,10);}
-  sigmaeps ~ cauchy(0, 2.5); // cauchy back
+  sigmaeps ~ cauchy(0, 5); // cauchy back
 
 }
 
