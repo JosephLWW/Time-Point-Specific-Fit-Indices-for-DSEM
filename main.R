@@ -157,10 +157,12 @@ cat(sprintf("Total Atomic Tasks: %d\n", nrow(conditions_grid)))
 is_cluster <- (!is.na(Sys.getenv("SLURM_JOB_ID", NA)) || 
                !is.na(Sys.getenv("SLURM_ARRAY_TASK_ID", NA)))
 
+# Recuperar RUN_ID (vendrá de la variable de entorno, sea nueva o manual)
+run_id <- Sys.getenv("RUN_ID", "local_run")
+
 if (is_cluster) {
   cat("Running on HPC cluster (SLURM detected)\n")
   rslurm_id <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID", "1"))
-  run_id <- Sys.getenv("RUN_ID", "local_run")
   job_id <- as.integer(Sys.getenv("SLURM_ARRAY_JOB_ID", "1"))
 } else {
   cat("Running locally (no SLURM environment)\n")
@@ -177,16 +179,27 @@ cat(sprintf("Job ID: %d | Run ID: %s\n", rslurm_id, run_id))
 
 # Routes
 base_dir <- config$output$results_dir
-# (ej. results/run_2933037)
 run_dir  <- file.path(base_dir, paste0("run_", run_id))
 
-# Create dir. showWarnings=FALSE evita errores si otra tarea ya creó la carpeta hace 1 milisegundo
-if (!dir.exists(run_dir)) {
-  dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
-}
-
+# LÓGICA DE REANUDACIÓN ROBUSTA
 db_file <- file.path(run_dir, "fit_indices.sqlite")
 config$db_path <- db_file
+
+# Si la carpeta no existe, la creamos (Nuevo Run)
+if (!dir.exists(run_dir)) {
+  dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
+  cat("Created NEW run directory:", run_dir, "\n")
+  init_db_needed <- TRUE
+} else {
+  cat(">>> RESUMING from EXISTING directory:", run_dir, "\n")
+  # Si reanudamos, NO queremos reinicializar la tabla tasks si ya tiene datos
+  init_db_needed <- FALSE 
+  
+  if (!file.exists(db_file)) {
+      cat("Warning: Directory exists but DB missing. Initializing as fresh.\n")
+      init_db_needed <- TRUE
+  }
+}
 
 Sys.sleep(runif(1, min=0.01, max=0.2))
 
