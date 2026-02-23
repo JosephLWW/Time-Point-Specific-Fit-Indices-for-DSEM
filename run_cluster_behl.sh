@@ -15,10 +15,19 @@ module purge
 # To check R version: module avail R
 module load math/R
 
-if [ -z "$SLURM_ARRAY_JOB_ID" ]; then
-    export RUN_ID="${SLURM_JOB_ID}"
+# AÑADIDO USO PARA REANUDAR:
+# sbatch --export=ALL,MANUAL_RUN_ID="12345" run_cluster_bw3.sh
+
+if [ -n "$MANUAL_RUN_ID" ]; then
+    echo ">>> RESUME MODE ACTIVATED: Using existing run_id $MANUAL_RUN_ID"
+    export RUN_ID="$MANUAL_RUN_ID"
 else
-    export RUN_ID="${SLURM_ARRAY_JOB_ID}"
+    # Comportamiento normal (Cluster o Array)
+    if [ -z "$SLURM_ARRAY_JOB_ID" ]; then
+        export RUN_ID="${SLURM_JOB_ID}"
+    else
+        export RUN_ID="${SLURM_ARRAY_JOB_ID}"
+    fi
 fi
 
 echo "Master RUN_ID is: $RUN_ID"
