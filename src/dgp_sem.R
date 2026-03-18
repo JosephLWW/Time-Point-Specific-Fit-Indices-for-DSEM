@@ -136,7 +136,7 @@ gendata02 <- function(N, Nt, phi0, mu0, ar0, ly0, ly1, td,t0=2){
     }
     
     
-    # generate observed data
+  # generate observed data
     # this includes no cross-time effects
     if (t0 > 2) {
       for(j in 2:(t0-1)){
@@ -144,9 +144,26 @@ gendata02 <- function(N, Nt, phi0, mu0, ar0, ly0, ly1, td,t0=2){
       }
     }
     
+    # NUEVO CÓDIGO: Ajuste de la varianza residual para mantener la escala - We try to solve scaling issues with this, but it might break the model if 
+    td_after <- td # Copiamos la varianza residual original (0.64 en la diagonal)
+    
+    # Extraemos el valor de M que introdujiste en main.R
+    M_val <- ly1[4, 1]
+    
+    # DEFINITION ADDED: We must define the loading from the ly0 matrix locally
+    # Based on context, this is factor loading for variable 4 on factor 2
+    ly0_val <- ly0[4, 2]
+    
+    # Calculamos la varianza adicional introducida por el término de cross-loading (M) y la covarianza entre los factores (phi0[1,2])
+    # Replace 'ly00' with 'ly0_val'
+    var_added <- (M_val^2) + (2 * M_val * ly0_val * phi0[1,2])
+    # max(0.01, ...) asegura que la varianza residual nunca sea negativa o 0.
+    td_after[4, 4] <- max(0.01, td[4, 4] - var_added)
+    
     # this includes cross-time effects
     for(j in t0:Nt){
-      y[j, , ] <- eta[j, , ]%*%t(ly0) + eta[j - 1, , ]%*%t(ly1) + rmvnorm(N, sigma = tdtt1)
+      # IMPORTANTE: Cambiamos 'sigma = td' (o tdtt1) por 'sigma = td_after'
+      y[j, , ] <- eta[j, , ]%*%t(ly0) + eta[j - 1, , ]%*%t(ly1) + rmvnorm(N, sigma = td_after)
     }
   }
   #diag(cov(y[Nt,,]))

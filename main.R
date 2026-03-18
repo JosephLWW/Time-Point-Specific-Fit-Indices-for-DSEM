@@ -327,7 +327,7 @@ while(keep_working) {
       db_path = config$db_path,
       job_id = rslurm_id,
       batch_size = 1, # Fetch 1 chunk at a time (Atomic) to prevent timeout
-      n_jobs = 150
+      n_jobs = 900
     )
     
     if (bundle$status == "empty") {

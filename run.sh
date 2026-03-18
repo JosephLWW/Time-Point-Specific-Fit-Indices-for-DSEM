@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --time=120:00:00
-#SBATCH --array=1-150
+#SBATCH --array=1-900
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=4G
 #SBATCH --output=logs/sim_%A_%a.out
@@ -13,7 +13,7 @@
 # Clean modules and load R
 module purge
 # To check R version: module avail R
-module load math/R
+module load math/R/4.4.2
 
 # AÑADIDO USO PARA REANUDAR:
 # sbatch --export=ALL,MANUAL_RUN_ID="12345" run.sh

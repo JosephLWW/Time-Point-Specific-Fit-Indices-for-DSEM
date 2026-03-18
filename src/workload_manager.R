@@ -78,7 +78,7 @@ init_tasks_db <- function(db_path, conditions_grid, batch_size = 3) {
 # ============================================================================
 
 get_bundle <- function(db_path, job_id, batch_size = 1, # Default batch size lowered for fine granularity
-                       n_jobs = 50, conditions_grid = NULL) {
+                       n_jobs = 300, conditions_grid = NULL) {
   require(RSQLite)
   db <- dbConnect(RSQLite::SQLite(), db_path)
   
